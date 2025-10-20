@@ -16,10 +16,24 @@ const AdminTest = () => {
       if (result.success) {
         navigate('/admin/dashboard');
       } else {
-        alert('Admin access failed: ' + result.error);
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'error',
+          title: 'Admin Access Failed',
+          text: result.error,
+          confirmButtonText: 'OK'
+        });
       }
     } catch (error) {
-      alert('Error: ' + error.message);
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: error.message,
+        confirmButtonText: 'OK'
+      });
     } finally {
       setLoading(false);
     }
@@ -32,12 +46,33 @@ const AdminTest = () => {
       console.log('Invalid credentials test result:', result);
       
       if (result.success) {
-        alert('Unexpected: Invalid credentials were accepted!');
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'warning',
+          title: 'Unexpected Result',
+          text: 'Invalid credentials were accepted!',
+          confirmButtonText: 'OK'
+        });
       } else {
-        alert('Expected error: ' + result.error);
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'info',
+          title: 'Expected Error',
+          text: result.error,
+          confirmButtonText: 'OK'
+        });
       }
     } catch (error) {
-      alert('Error: ' + error.message);
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: error.message,
+        confirmButtonText: 'OK'
+      });
     } finally {
       setLoading(false);
     }

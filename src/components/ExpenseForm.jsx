@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { supabase } from '../lib/supabase';
+import EnhancedReceiptUpload from './EnhancedReceiptUpload';
+import expenseCategoriesService from '../services/expenseCategoriesService';
 
 const ExpenseForm = () => {
   const { user } = useSupabaseAuth();
@@ -9,27 +11,49 @@ const ExpenseForm = () => {
     category: 'Food',
     paymentMethod: 'UPI',
     date: new Date().toISOString().split('T')[0],
-    description: ''
+    description: '',
+    receiptUrl: ''
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [transactions, setTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(true);
+  const [categories, setCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
 
-  // Categories and payment methods
-  const categories = [
-    'Food', 'Rent', 'Transport', 'Shopping', 'Bills', 
-    'EMI', 'Education', 'Entertainment', 'Investments'
-  ];
+  // Payment methods
 
   const paymentMethods = ['UPI', 'Card', 'Cash', 'Bank Transfer'];
 
-  // Load transactions on component mount
+  // Load transactions and categories on component mount
   useEffect(() => {
     if (user) {
       loadTransactions();
+      loadCategories();
     }
   }, [user]);
+
+  // Load categories from database
+  const loadCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const categoriesData = await expenseCategoriesService.getAllCategories();
+      setCategories(categoriesData);
+      
+      // Set default category if available
+      if (categoriesData.length > 0) {
+        setFormData(prev => ({
+          ...prev,
+          category: categoriesData[0].category
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      setMessage('Error loading categories. Please refresh the page.');
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
 
   // Load transactions from Supabase
   const loadTransactions = async () => {
@@ -64,6 +88,111 @@ const ExpenseForm = () => {
     }));
   };
 
+  // Handle data extracted from receipt OCR
+  const handleReceiptDataExtracted = (extractedData) => {
+    console.log('🔍 ExpenseForm: Received extracted data:', extractedData);
+    
+    const updates = {};
+    
+    // Amount extraction
+    if (extractedData.amount) {
+      updates.amount = extractedData.amount.toString();
+      console.log('💰 Setting amount:', updates.amount);
+    }
+    
+    // Date extraction
+    if (extractedData.date) {
+      updates.date = extractedData.date;
+      console.log('📅 Setting date:', updates.date);
+    }
+    
+    // Category extraction - try to match with existing categories
+    if (extractedData.category) {
+      console.log('🔍 Trying to match category:', extractedData.category);
+      
+      // Create a mapping for common AI-extracted categories to database categories
+      const categoryMapping = {
+        'food': 'Food & Dining',
+        'food & dining': 'Food & Dining',
+        'dining': 'Food & Dining',
+        'restaurant': 'Food & Dining',
+        'cafe': 'Food & Dining',
+        'transportation': 'Transportation',
+        'transport': 'Transportation',
+        'shopping': 'Shopping',
+        'bills & utilities': 'Utilities',
+        'bills': 'Utilities',
+        'utilities': 'Utilities',
+        'healthcare': 'Healthcare',
+        'health': 'Healthcare',
+        'entertainment': 'Entertainment',
+        'education': 'Education',
+        'housing': 'Housing',
+        'miscellaneous': 'Miscellaneous',
+        'misc': 'Miscellaneous',
+        'financial': 'Financial'
+      };
+      
+      // First try exact mapping
+      let matchedCategory = categoryMapping[extractedData.category.toLowerCase()];
+      
+      if (matchedCategory) {
+        // Verify the mapped category exists in the database
+        const dbCategory = categories.find(cat => cat.category === matchedCategory);
+        if (dbCategory) {
+          updates.category = matchedCategory;
+          console.log('🏷️ Category mapped successfully:', extractedData.category, '→', matchedCategory);
+        }
+      }
+      
+      // If no mapping found, try fuzzy matching
+      if (!updates.category) {
+        const matchingCategory = categories.find(cat => 
+          cat.category.toLowerCase().includes(extractedData.category.toLowerCase()) ||
+          extractedData.category.toLowerCase().includes(cat.category.toLowerCase())
+        );
+        if (matchingCategory) {
+          updates.category = matchingCategory.category;
+          console.log('🏷️ Category matched via fuzzy search:', updates.category);
+        } else {
+          console.log('⚠️ Category not found in available categories:', extractedData.category);
+          console.log('📋 Available categories:', categories.map(c => c.category));
+        }
+      }
+    }
+    
+    // Payment method extraction
+    if (extractedData.paymentMethod) {
+      const paymentMethodMap = {
+        'cash': 'Cash',
+        'card': 'Card', 
+        'upi': 'UPI',
+        'bank transfer': 'Bank Transfer',
+        'debit': 'Card',
+        'credit': 'Card'
+      };
+      
+      const mappedMethod = paymentMethodMap[extractedData.paymentMethod.toLowerCase()] || extractedData.paymentMethod;
+      updates.paymentMethod = mappedMethod;
+      console.log('💳 Setting payment method:', updates.paymentMethod);
+    }
+    
+    // Description extraction
+    if (extractedData.description) {
+      updates.description = extractedData.description;
+      console.log('📝 Setting description:', updates.description);
+    }
+    
+    console.log('🔄 Updating form with:', updates);
+    setFormData(prev => ({ ...prev, ...updates }));
+    setMessage('✅ Receipt processed! Please review the extracted information.');
+  };
+
+  // Handle receipt upload
+  const handleReceiptUploaded = (receiptUrl) => {
+    setFormData(prev => ({ ...prev, receiptUrl }));
+  };
+
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -91,7 +220,8 @@ const ExpenseForm = () => {
             category: formData.category,
             payment_method: formData.paymentMethod,
             date: formData.date,
-            description: formData.description || null
+            description: formData.description || null,
+            receipt_url: formData.receiptUrl || null
           }
         ])
         .select();
@@ -109,7 +239,8 @@ const ExpenseForm = () => {
           category: 'Food',
           paymentMethod: 'UPI',
           date: new Date().toISOString().split('T')[0],
-          description: ''
+          description: '',
+          receiptUrl: ''
         });
 
         // Reload transactions
@@ -125,9 +256,17 @@ const ExpenseForm = () => {
 
   // Delete transaction
   const handleDeleteTransaction = async (transactionId) => {
-    if (!window.confirm('Are you sure you want to delete this transaction?')) {
-      return;
-    }
+    const { getSwal } = await import('../lib/swal');
+    const Swal = await getSwal();
+    const res = await Swal.fire({
+      icon: 'warning',
+      title: 'Delete Transaction?',
+      text: 'Are you sure you want to delete this transaction?',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, delete',
+      cancelButtonText: 'Cancel'
+    });
+    if (!res.isConfirmed) return;
 
     try {
       const { error } = await supabase
@@ -229,8 +368,27 @@ const ExpenseForm = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* Step 1: Receipt Upload First */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
+            <h3 className="text-lg font-semibold text-blue-900 mb-4 flex items-center">
+              📸 Step 1: Upload Receipt
+              <span className="ml-2 text-sm font-normal text-blue-600">(AI will auto-fill fields below)</span>
+            </h3>
+            <EnhancedReceiptUpload
+              onDataExtracted={handleReceiptDataExtracted}
+              onReceiptUploaded={handleReceiptUploaded}
+            />
+          </div>
+
+          {/* Step 2: Review & Edit Auto-filled Fields */}
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              ✏️ Step 2: Review & Edit Details
+              <span className="ml-2 text-sm font-normal text-gray-500">(AI pre-filled, please verify)</span>
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Amount */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -253,18 +411,26 @@ const ExpenseForm = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Category *
               </label>
-              <select
-                value={formData.category}
-                onChange={(e) => handleInputChange('category', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                required
-              >
-                {categories.map(category => (
-                  <option key={category} value={category}>
-                    {getCategoryIcon(category)} {category}
-                  </option>
-                ))}
-              </select>
+              {categoriesLoading ? (
+                <div className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 flex items-center justify-center">
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-teal-500 rounded-full animate-spin mr-2"></div>
+                  <span className="text-gray-500">Loading categories...</span>
+                </div>
+              ) : (
+                <select
+                  value={formData.category}
+                  onChange={(e) => handleInputChange('category', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  required
+                >
+                  <option value="">Select a category</option>
+                  {categories.map(category => (
+                    <option key={category.id} value={category.category}>
+                      {category.icon} {category.category}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {/* Payment Method */}
@@ -297,22 +463,29 @@ const ExpenseForm = () => {
                 onChange={(e) => handleInputChange('date', e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                 required
+                max={new Date().toISOString().split('T')[0]}
+                min={new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0]}
+                title="Select a date within the last year (from 1 year ago to today)"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Cannot be in the future or more than 1 year ago (from {new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toLocaleDateString()} to today)
+              </p>
+            </div>
+            </div>
+
+            {/* Description */}
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Description (Optional)
+              </label>
+              <textarea
+                value={formData.description}
+                onChange={(e) => handleInputChange('description', e.target.value)}
+                rows={3}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                placeholder="Brief description of the expense"
               />
             </div>
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Description (Optional)
-            </label>
-            <textarea
-              value={formData.description}
-              onChange={(e) => handleInputChange('description', e.target.value)}
-              rows={3}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-              placeholder="Add a description for this expense..."
-            />
           </div>
 
           {/* Submit Button */}

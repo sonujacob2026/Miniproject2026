@@ -4,6 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import UserManagement from './UserManagement';
 import AdminStats from './AdminStats';
 import SystemSettings from './SystemSettings';
+import ExpenseCategoriesManager from './ExpenseCategoriesManager';
+import IncomeCategoriesManager from './IncomeCategoriesManager';
+// CategoryTypes page removed
 
 const AdminDashboard = () => {
   const { isAdmin, adminUser, adminSignOut } = useAdmin();
@@ -27,6 +30,8 @@ const AdminDashboard = () => {
     }
   }, [isAdmin, navigate]);
 
+  
+
   const handleSignOut = () => {
     adminSignOut();
     navigate('/');
@@ -46,13 +51,15 @@ const AdminDashboard = () => {
   const tabs = [
     { id: 'overview', name: 'Overview', icon: '📊' },
     { id: 'users', name: 'User Management', icon: '👥' },
-    { id: 'settings', name: 'Settings', icon: '⚙️' }
+    { id: 'settings', name: 'Settings', icon: '⚙️' },
+    { id: 'categories', name: 'Expense Categories', icon: '📂' },
+    { id: 'income-categories', name: 'Income Categories', icon: '💰' }
   ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
+      {/* Header - Made sticky */}
+      <header className="sticky top-0 z-50 bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo and Title */}
@@ -85,8 +92,8 @@ const AdminDashboard = () => {
         </div>
       </header>
 
-      {/* Navigation Tabs */}
-      <nav className="bg-white border-b border-gray-200">
+      {/* Navigation Tabs - Made sticky */}
+      <nav className="sticky top-16 z-40 bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-8">
             {tabs.map((tab) => (
@@ -109,9 +116,32 @@ const AdminDashboard = () => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'overview' && <AdminStats />}
+        {activeTab === 'overview' && (
+          <>
+            <AdminStats />
+          </>
+        )}
         {activeTab === 'users' && <UserManagement />}
         {activeTab === 'settings' && <SystemSettings />}
+        
+        {activeTab === 'categories' && (
+          <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Expense Categories Management</h2>
+              <p className="text-gray-600">Manage expense categories and subcategories for your application</p>
+            </div>
+            <ExpenseCategoriesManager />
+          </div>
+        )}
+        {activeTab === 'income-categories' && (
+          <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Income Categories Management</h2>
+              <p className="text-gray-600">Manage income categories and subcategories for your application</p>
+            </div>
+            <IncomeCategoriesManager />
+          </div>
+        )}
       </main>
     </div>
   );

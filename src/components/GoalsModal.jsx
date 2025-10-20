@@ -40,11 +40,20 @@ const GoalsModal = ({ onClose }) => {
     setGoals(goals.filter((g) => g.id !== id));
   };
 
-  const reset = () => {
-    if (confirm('Remove all locally saved goals?')) {
-      resetGoals();
-      setGoals([]);
-    }
+  const reset = async () => {
+    const { getSwal } = await import('../lib/swal');
+    const Swal = await getSwal();
+    const res = await Swal.fire({
+      icon: 'warning',
+      title: 'Reset Goals?',
+      text: 'Remove all locally saved goals?',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, reset',
+      cancelButtonText: 'Cancel'
+    });
+    if (!res.isConfirmed) return;
+    resetGoals();
+    setGoals([]);
   };
 
   useEffect(() => {

@@ -60,9 +60,16 @@ const SupabaseDebug = () => {
     }
   };
 
-  const copyToClipboard = (text) => {
+  const copyToClipboard = async (text) => {
     navigator.clipboard.writeText(text);
-    alert('Copied to clipboard!');
+    const { getSwal } = await import('../lib/swal');
+    const Swal = await getSwal();
+    await Swal.fire({
+      icon: 'success',
+      title: 'Copied!',
+      text: 'Copied to clipboard!',
+      confirmButtonText: 'OK'
+    });
   };
 
   return (

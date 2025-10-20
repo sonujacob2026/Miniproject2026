@@ -17,64 +17,95 @@ export const SupabaseAuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
+    // Try to load cached session first for instant loading
+    const cachedSession = localStorage.getItem('supabase_session');
+    let hasCachedSession = false;
+    
+    if (cachedSession) {
+      try {
+        const parsed = JSON.parse(cachedSession);
+        if (parsed && parsed.expires_at && new Date(parsed.expires_at) > new Date()) {
+          setSession(parsed);
+          setUser(parsed.user);
+          hasCachedSession = true;
+          setLoading(false);
+          console.log('SupabaseAuth: Loaded cached session, showing immediately');
+        }
+      } catch (error) {
+        console.error('Error parsing cached session:', error);
+        localStorage.removeItem('supabase_session');
+      }
+    }
+
+    // Get fresh session
     const getInitialSession = async () => {
-      const startTime = performance.now();
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) {
           console.error('Error getting session:', error);
         } else {
+          // Update session and user
           setSession(session);
           setUser(session?.user ?? null);
+          
+          // Cache the session for next time
+          if (session) {
+            localStorage.setItem('supabase_session', JSON.stringify(session));
+          } else {
+            localStorage.removeItem('supabase_session');
+          }
         }
       } catch (error) {
         console.error('Error in getInitialSession:', error);
       } finally {
-        setLoading(false);
+        if (!hasCachedSession) {
+          setLoading(false);
+        }
       }
     };
 
-    getInitialSession();
+    // Safety timeout set to 30s to allow Google OAuth redirects to complete
+    const safety = setTimeout(() => {
+      console.log('SupabaseAuth: Safety timeout reached, setting loading to false');
+      setLoading(false);
+    }, 30000);
+
+    getInitialSession().finally(() => clearTimeout(safety));
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('Auth state changed:', event);
+        // no-op for INITIAL_SESSION in original behavior
         
         // Handle OAuth callback events more smoothly
         if (event === 'SIGNED_IN' && session?.user) {
-          console.log('User signed in via OAuth:', session.user.email);
+          console.log('✅ OAuth sign-in successful:', session.user.email);
           
           // Skip processing if this is an admin user (handled by admin system)
           if (session.user.email === 'admin@gmail.com') {
             console.log('Admin user detected in Supabase auth, ignoring...');
+            // Don't set user state for admin - let admin context handle it
             return;
           }
           
-          // Check user status in background (non-blocking)
-          supabase
-            .from('user_profiles')
-            .select('status')
-            .eq('user_id', session.user.id)
-            .single()
-            .then(({ data: userProfile, error: profileError }) => {
-              if (profileError) {
-                console.warn('Could not fetch user profile for OAuth user:', profileError);
-              } else if (userProfile?.status === 'suspended') {
-                console.log('OAuth user account is suspended, signing out...');
-                supabase.auth.signOut();
-              }
-            })
-            .catch((statusError) => {
-              console.warn('Error checking OAuth user status:', statusError);
-            });
+          // Check if admin mode is active - if so, don't process regular user sign-ins
+          const adminMode = localStorage.getItem('admin_mode') === 'true';
+          if (adminMode) {
+            console.log('Admin mode active, ignoring regular user sign-in');
+            return;
+          }
+          
+          // (Removed deprecated status check: column does not exist in user_profiles)
           
           // Set user immediately for faster loading
           setSession(session);
           setUser(session.user);
           setLoading(false);
+          
+          // Cache the session
+          localStorage.setItem('supabase_session', JSON.stringify(session));
 
           // Ensure a user_profiles row exists and is linked to this user_id
           try {
@@ -105,6 +136,13 @@ export const SupabaseAuthProvider = ({ children }) => {
           setSession(session);
           setUser(session?.user ?? null);
           setLoading(false);
+          
+          // Cache or clear session
+          if (session) {
+            localStorage.setItem('supabase_session', JSON.stringify(session));
+          } else {
+            localStorage.removeItem('supabase_session');
+          }
         }
       }
     );
@@ -257,29 +295,7 @@ export const SupabaseAuthProvider = ({ children }) => {
 
       console.log('✅ Sign in successful:', data.user);
 
-      // Check user status before allowing login
-      try {
-        const { data: userProfile, error: profileError } = await supabase
-          .from('user_profiles')
-          .select('status, full_name')
-          .eq('user_id', data.user.id)
-          .single();
-
-        if (profileError) {
-          console.warn('Could not fetch user profile:', profileError);
-        } else if (userProfile?.status === 'suspended') {
-          console.log('User account is suspended, signing out...');
-          // Sign out the user immediately
-          await supabase.auth.signOut();
-          return {
-            user: null,
-            error: 'Your account has been disabled. Please contact support for assistance.'
-          };
-        }
-      } catch (statusError) {
-        console.warn('Error checking user status:', statusError);
-        // Continue with login if status check fails (don't block legitimate users)
-      }
+      // (Removed deprecated status check on user_profiles)
 
       // Update local state immediately
       setUser(data.user);
@@ -321,26 +337,34 @@ export const SupabaseAuthProvider = ({ children }) => {
   const signInWithGoogle = async () => {
     try {
       setLoading(true);
+      console.log('🔄 Starting Google OAuth flow...');
+      
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/dashboard`
+          redirectTo: `${window.location.origin}/dashboard`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent'
+          }
         }
       });
 
       if (error) {
-        // Return the full error object so callers can inspect error.message
+        console.error('❌ Google sign-in error:', error);
+        setLoading(false);
         return { user: null, error };
       }
 
-      // Note: For OAuth, the user will be redirected and the auth state change will handle the rest
+      console.log('✅ Google OAuth redirect initiated');
+      // Don't set loading to false here - let OAuth flow complete naturally
       return { user: null, error: null };
     } catch (error) {
-      // Return the caught error object for consistent shape
-      return { user: null, error };
-    } finally {
+      console.error('❌ Google sign-in exception:', error);
       setLoading(false);
+      return { user: null, error };
     }
+    // Removed finally block to prevent premature loading state reset
   };
 
   // Sign out
@@ -356,6 +380,10 @@ export const SupabaseAuthProvider = ({ children }) => {
     // Clear localStorage keys related to user data to prevent stale data
     try {
       localStorage.removeItem('expenseai_expenses');
+      localStorage.removeItem('household_expenses');
+      localStorage.removeItem('household_monthly_stats');
+      localStorage.removeItem('cached_profile');
+      localStorage.removeItem('supabase_session');
       localStorage.removeItem('questionnaire_banner_dismissed');
       // Add any other keys that should be cleared on sign out here
       console.log('SupabaseAuth: Cleared localStorage keys on sign out');
@@ -416,7 +444,7 @@ export const SupabaseAuthProvider = ({ children }) => {
   // Update password (called after user clicks reset link)
   const updatePassword = async (newPassword) => {
     try {
-      setLoading(true);
+      // Don't set global loading state - component has its own loading state
       console.log('🔐 Updating password...');
       
       const { data, error } = await supabase.auth.updateUser({
@@ -433,8 +461,6 @@ export const SupabaseAuthProvider = ({ children }) => {
     } catch (error) {
       console.error('❌ updatePassword exception:', error);
       return { success: false, error: error.message };
-    } finally {
-      setLoading(false);
     }
   };
 

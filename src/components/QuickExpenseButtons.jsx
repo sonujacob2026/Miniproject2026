@@ -99,11 +99,8 @@ const QuickExpenseButtons = ({ onExpenseAdded }) => {
   const [amounts, setAmounts] = useState(initialAmounts);
 
   const stepFor = (name) => {
-    // Small items adjust by 50, larger by 100/500
-    const value = amounts[name] ?? 0;
-    if (value < 1000) return 50;
-    if (value < 5000) return 100;
-    return 500;
+    // All items adjust by 1
+    return 1;
   };
 
   const inc = (name) => {
@@ -176,10 +173,18 @@ const QuickExpenseButtons = ({ onExpenseAdded }) => {
         notes: 'Added via quick expense button'
       };
 
-      const { data, error } = await supabase
+      // Add a safety timeout so UI never hangs if network stalls
+      const withTimeout = (p, ms) => Promise.race([
+        p,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms))
+      ]);
+
+      const insertPromise = supabase
         .from('expenses')
         .insert([expenseData])
         .select();
+
+      const { data, error } = await withTimeout(insertPromise, 10000);
 
       if (error) {
         console.error('Error adding quick expense:', error);

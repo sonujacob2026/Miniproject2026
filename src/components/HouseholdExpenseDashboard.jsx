@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import HouseholdExpenseForm from './HouseholdExpenseForm';
 import QuickExpenseButtons from './QuickExpenseButtons';
 import RecurringExpensesManager from './RecurringExpensesManager';
+import ExpenseChangeIndicator from './ExpenseChangeIndicator';
 
 const HouseholdExpenseDashboard = () => {
   const { user } = useSupabaseAuth();
@@ -20,12 +21,47 @@ const HouseholdExpenseDashboard = () => {
   });
   const [recurringRefreshKey, setRecurringRefreshKey] = useState(0);
 
-  // Load expenses
+  // Load cached expenses and stats immediately for better UX on refresh
+  useEffect(() => {
+    const cached = localStorage.getItem('household_expenses');
+    const cachedStats = localStorage.getItem('household_monthly_stats');
+    
+    if (cached) {
+      try {
+        const cachedData = JSON.parse(cached);
+        setExpenses(cachedData);
+        calculateMonthlyStats(cachedData);
+      } catch (error) {
+        console.error('Error parsing cached expenses:', error);
+      }
+    }
+    
+    if (cachedStats) {
+      try {
+        const parsedStats = JSON.parse(cachedStats);
+        setMonthlyStats(parsedStats);
+      } catch (error) {
+        console.error('Error parsing cached stats:', error);
+      }
+    }
+  }, []);
+
+  // Load expenses from database
   useEffect(() => {
     if (user?.id) {
       loadExpenses();
     }
   }, [user?.id]);
+
+  // Save expenses to localStorage whenever expenses change
+  useEffect(() => {
+    localStorage.setItem('household_expenses', JSON.stringify(expenses));
+  }, [expenses]);
+
+  // Save monthly stats to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('household_monthly_stats', JSON.stringify(monthlyStats));
+  }, [monthlyStats]);
 
   const loadExpenses = async () => {
     try {
@@ -34,7 +70,7 @@ const HouseholdExpenseDashboard = () => {
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
       const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-      
+
       const { data, error } = await supabase
         .from('expenses')
         .select('*')
@@ -44,13 +80,49 @@ const HouseholdExpenseDashboard = () => {
         .order('date', { ascending: false });
 
       if (error) {
-        console.error('Error loading expenses:', error);
+        console.error('Error loading expenses from DB:', error);
+        // Load from cache
+        const cached = localStorage.getItem('household_expenses');
+        if (cached) {
+          try {
+            const cachedData = JSON.parse(cached);
+            setExpenses(cachedData);
+            calculateMonthlyStats(cachedData);
+          } catch (parseError) {
+            console.error('Error parsing cached expenses:', parseError);
+            setExpenses([]);
+            calculateMonthlyStats([]);
+          }
+        } else {
+          setExpenses([]);
+          calculateMonthlyStats([]);
+        }
       } else {
-        setExpenses(data || []);
-        calculateMonthlyStats(data || []);
+        const normalized = (data || []).map((e) => ({
+          ...e,
+          amount: Number(e.amount)
+        }));
+        setExpenses(normalized);
+        calculateMonthlyStats(normalized);
       }
     } catch (error) {
       console.error('Exception loading expenses:', error);
+      // Load from cache
+      const cached = localStorage.getItem('household_expenses');
+      if (cached) {
+        try {
+          const cachedData = JSON.parse(cached);
+          setExpenses(cachedData);
+          calculateMonthlyStats(cachedData);
+        } catch (parseError) {
+          console.error('Error parsing cached expenses:', parseError);
+          setExpenses([]);
+          calculateMonthlyStats([]);
+        }
+      } else {
+        setExpenses([]);
+        calculateMonthlyStats([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -66,16 +138,17 @@ const HouseholdExpenseDashboard = () => {
     };
 
     expenseData.forEach(expense => {
-      stats.total += expense.amount;
+      const amt = Number(expense.amount) || 0;
+      stats.total += amt;
       
       if (expense.subcategory === 'Utilities') {
-        stats.utilities += expense.amount;
+        stats.utilities += amt;
       } else if (expense.subcategory === 'Food & Groceries') {
-        stats.food += expense.amount;
+        stats.food += amt;
       } else if (expense.subcategory === 'Transportation') {
-        stats.transport += expense.amount;
+        stats.transport += amt;
       } else {
-        stats.other += expense.amount;
+        stats.other += amt;
       }
     });
 
@@ -83,12 +156,15 @@ const HouseholdExpenseDashboard = () => {
   };
 
   const handleExpenseAdded = (newExpense) => {
-    setExpenses(prev => [newExpense, ...prev]);
-    calculateMonthlyStats([newExpense, ...expenses]);
-    // If the newly added expense is recurring, bump refresh key to reload recurring list
-    if (newExpense?.is_recurring) {
-      setRecurringRefreshKey((k) => k + 1);
-    }
+    setExpenses(prev => {
+      const updated = [newExpense, ...prev];
+      calculateMonthlyStats(updated);
+      // If the newly added expense is recurring, bump refresh key to reload recurring list
+      if (newExpense?.is_recurring) {
+        setRecurringRefreshKey((k) => k + 1);
+      }
+      return updated;
+    });
     setShowAddForm(false);
   };
 
@@ -116,20 +192,6 @@ const HouseholdExpenseDashboard = () => {
     });
   };
 
-  if (loading) {
-    return (
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <div className="animate-pulse">
-          <div className="h-6 bg-gray-200 rounded w-1/4 mb-4"></div>
-          <div className="space-y-3">
-            <div className="h-4 bg-gray-200 rounded"></div>
-            <div className="h-4 bg-gray-200 rounded w-5/6"></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -139,24 +201,36 @@ const HouseholdExpenseDashboard = () => {
         </div>
 
         {/* Monthly Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-4 rounded-lg">
-            <div className="text-sm opacity-90">Total This Month</div>
-            <div className="text-2xl font-bold">₹{monthlyStats.total.toLocaleString()}</div>
+        {loading ? (
+          <div className="animate-pulse">
+            <div className="h-6 bg-gray-200 rounded w-1/4 mb-4"></div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="h-16 bg-gray-200 rounded"></div>
+              <div className="h-16 bg-gray-200 rounded"></div>
+              <div className="h-16 bg-gray-200 rounded"></div>
+              <div className="h-16 bg-gray-200 rounded"></div>
+            </div>
           </div>
-          <div className="bg-gradient-to-r from-green-500 to-green-600 text-white p-4 rounded-lg">
-            <div className="text-sm opacity-90">Utilities</div>
-            <div className="text-2xl font-bold">₹{monthlyStats.utilities.toLocaleString()}</div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-4 rounded-lg">
+              <div className="text-sm opacity-90">Total This Month</div>
+              <div className="text-2xl font-bold">₹{monthlyStats.total.toLocaleString()}</div>
+            </div>
+            <div className="bg-gradient-to-r from-green-500 to-green-600 text-white p-4 rounded-lg">
+              <div className="text-sm opacity-90">Utilities</div>
+              <div className="text-2xl font-bold">₹{monthlyStats.utilities.toLocaleString()}</div>
+            </div>
+            <div className="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-4 rounded-lg">
+              <div className="text-sm opacity-90">Food & Groceries</div>
+              <div className="text-2xl font-bold">₹{monthlyStats.food.toLocaleString()}</div>
+            </div>
+            <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white p-4 rounded-lg">
+              <div className="text-sm opacity-90">Transportation</div>
+              <div className="text-2xl font-bold">₹{monthlyStats.transport.toLocaleString()}</div>
+            </div>
           </div>
-          <div className="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-4 rounded-lg">
-            <div className="text-sm opacity-90">Food & Groceries</div>
-            <div className="text-2xl font-bold">₹{monthlyStats.food.toLocaleString()}</div>
-          </div>
-          <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white p-4 rounded-lg">
-            <div className="text-sm opacity-90">Transportation</div>
-            <div className="text-2xl font-bold">₹{monthlyStats.transport.toLocaleString()}</div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -252,6 +326,9 @@ const HouseholdExpenseDashboard = () => {
           </div>
         </div>
       )}
+
+      {/* Expense Change Indicator */}
+      <ExpenseChangeIndicator expenses={expenses} showOnRefresh={true} />
     </div>
   );
 };

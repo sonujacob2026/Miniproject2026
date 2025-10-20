@@ -38,10 +38,24 @@ const DebugAuth = () => {
     try {
       const { data, error } = await supabase.from('_realtime').select('*').limit(1);
       console.log('Connection test:', { data, error });
-      alert(error ? `Connection failed: ${error.message}` : 'Connection successful!');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: error ? 'error' : 'success',
+        title: error ? 'Connection Failed' : 'Connection Successful',
+        text: error ? `Connection failed: ${error.message}` : 'Connection successful!',
+        confirmButtonText: 'OK'
+      });
     } catch (error) {
       console.error('Connection test failed:', error);
-      alert(`Connection test failed: ${error.message}`);
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Connection Test Failed',
+        text: `Connection test failed: ${error.message}`,
+        confirmButtonText: 'OK'
+      });
     }
   };
 

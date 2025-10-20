@@ -91,7 +91,14 @@ const Questionnaire = () => {
 
     if (!user?.id) {
       console.error('❌ No user ID available');
-      alert('Please sign in to save your profile');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'warning',
+        title: 'Authentication Required',
+        text: 'Please sign in to save your profile',
+        confirmButtonText: 'OK'
+      });
       return;
     }
 
@@ -133,12 +140,26 @@ const Questionnaire = () => {
         navigate('/dashboard');
       } else {
         console.error('❌ Failed to save profile:', result.error);
-        alert('Failed to save your profile. Please try again.');
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'error',
+          title: 'Save Failed',
+          text: 'Failed to save your profile. Please try again.',
+          confirmButtonText: 'OK'
+        });
       }
 
     } catch (error) {
       console.error('❌ Error in questionnaire submission:', error);
-      alert('An error occurred while saving your profile. Please try again.');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'An error occurred while saving your profile. Please try again.',
+        confirmButtonText: 'OK'
+      });
     } finally {
       setLoading(false);
     }

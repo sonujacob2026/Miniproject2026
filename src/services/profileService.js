@@ -43,7 +43,6 @@ function mapRowToForm(row) {
     // For UserProfile
     full_name: row.full_name ?? '',
     email: row.email ?? '',
-    profile_picture_url: row.profile_picture_url ?? '',
   };
 }
 
@@ -66,82 +65,68 @@ function mapProfileFormToRow(formData, userId) {
     savings_goal: formData.savings_goal || null,
     budgeting_experience: formData.budgeting_experience || null,
     financial_goals: Array.isArray(formData.financial_goals) ? formData.financial_goals : [],
-    profile_picture_url: formData.profile_picture_url || null,
   };
 }
 
 const ProfileService = {
-  // Cache for profile data to avoid repeated queries
-  _profileCache: new Map(),
-  _cacheTimeout: 5 * 60 * 1000, // 5 minutes
 
-  // Get raw profile row for a user with caching and fast timeout
-  async getProfile(userId) {
-    const startTime = performance.now();
-    
+  // Clear cache for a specific user
+  clearCache(userId) {
     try {
-      // Check cache first
-      const cacheKey = `profile_${userId}`;
-      const cached = this._profileCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < this._cacheTimeout) {
-        console.log('ProfileService: Using cached profile for user:', userId);
-        return { success: true, data: cached.data };
-      }
+      // Clear localStorage cache
+      localStorage.removeItem(`profile_${userId}`);
+      console.log('ProfileService: Cache cleared for user:', userId);
+    } catch (error) {
+      console.error('ProfileService: Error clearing cache:', error);
+    }
+  },
 
-      console.log('ProfileService: Getting profile for user:', userId);
-      
-      // Create a timeout promise (increase to 5 seconds to avoid premature timeout)
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Database query timeout')), 5000)
-      );
-      
-      // Try simple user_id query with timeout
-      const queryPromise = supabase
+  // Get raw profile row for a user - always fetch from database with validation
+  async getProfile(userId) {
+    try {
+      console.log('ProfileService: Fetching profile from database for user:', userId);
+
+      const baseSelect = 'user_id, full_name, email, onboarding_completed, household_members, monthly_income, has_debt, debt_amount, savings_goal, primary_expenses, budgeting_experience, financial_goals, created_at, updated_at';
+
+      const { data, error } = await supabase
         .from(table)
-        .select('*')
+        .select(baseSelect)
         .eq('user_id', userId)
-        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
-
       if (error) {
-        console.error('ProfileService: Error getting profile:', error);
+        console.error('ProfileService: Database error:', error);
         return { success: false, error: error.message };
       }
 
-      let row = data || null;
+      const row = data || null;
       
-      // Cache the result if found
+      // Validate data completeness
       if (row) {
-        this._profileCache.set(cacheKey, {
-          data: row,
-          timestamp: Date.now()
-        });
+        const requiredFields = ['user_id', 'full_name', 'email'];
+        const missingFields = requiredFields.filter(field => 
+          !row[field] || row[field] === '' || row[field] === null
+        );
+        
+        if (missingFields.length > 0) {
+          console.warn('ProfileService: Profile data is incomplete, missing fields:', missingFields);
+          return { 
+            success: false, 
+            error: `Profile data is incomplete. Missing: ${missingFields.join(', ')}`,
+            data: row // Return partial data for debugging
+          };
+        }
       }
 
-      const loadTime = performance.now() - startTime;
-      console.log(`ProfileService: Profile loaded in ${loadTime.toFixed(2)}ms`);
-      console.log('ProfileService: Profile data:', row);
-      
-      return { success: true, data: row || null };
+      console.log('ProfileService: Profile fetched and validated successfully from database');
+      return { success: true, data: row };
     } catch (err) {
       console.error('ProfileService: Exception getting profile:', err);
       return { success: false, error: err.message };
     }
   },
 
-  // Clear cache for a specific user
-  clearCache(userId) {
-    const cacheKey = `profile_${userId}`;
-    this._profileCache.delete(cacheKey);
-  },
-
-  // Clear all cache
-  clearAllCache() {
-    this._profileCache.clear();
-  },
 
   // Save entire profile (used by questionnaire completion)
   async saveProfile(formData, userId) {
@@ -192,10 +177,46 @@ const ProfileService = {
     }
   },
 
+  // Create a minimal persisted profile row if none exists
+  async createBasicProfile(user) {
+    try {
+      if (!user?.id) return { success: false, error: 'No user' };
+      const now = new Date().toISOString();
+      const basic = {
+        user_id: user.id,
+        email: user.email || null,
+        full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+        onboarding_completed: false,
+        created_at: now,
+        updated_at: now
+      };
+      const { data, error } = await supabase
+        .from(table)
+        .upsert(basic, { onConflict: 'user_id' })
+        .select()
+        .maybeSingle();
+      if (error) return { success: false, error: error.message };
+      // prime cache
+      this._profileCache.set(`profile_${user.id}`, { data, timestamp: Date.now() });
+      return { success: true, data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
   // Update specific fields on the profile row
   async updateProfile(userId, updates) {
     try {
       console.log('ProfileService: Updating profile for user:', userId, 'updates:', updates);
+      
+      if (!userId) {
+        return { success: false, error: 'User ID is required' };
+      }
+      
+      if (!updates || Object.keys(updates).length === 0) {
+        return { success: false, error: 'No updates provided' };
+      }
+      
       const now = new Date().toISOString();
       
       // Convert updates to proper format
@@ -207,6 +228,11 @@ const ProfileService = {
       // Handle debt fields properly
       if (updates.has_debt !== undefined) {
         formattedUpdates.has_debt = updates.has_debt === 'yes' ? true : updates.has_debt === 'no' ? false : null;
+      }
+      
+      // Validate required fields if they're being updated
+      if (updates.full_name && (!updates.full_name.trim() || updates.full_name.trim().length < 2)) {
+        return { success: false, error: 'Full name must be at least 2 characters long' };
       }
       
       const { data, error } = await supabase
@@ -221,6 +247,11 @@ const ProfileService = {
         return { success: false, error: error.message };
       }
       
+      if (!data) {
+        console.error('ProfileService: No data returned after update');
+        return { success: false, error: 'Profile not found or update failed' };
+      }
+      
       // Clear cache to ensure fresh data
       this.clearCache(userId);
       
@@ -228,65 +259,10 @@ const ProfileService = {
       return { success: true, data };
     } catch (err) {
       console.error('ProfileService: Exception updating profile:', err);
-      return { success: false, error: err.message };
+      return { success: false, error: err.message || 'An unexpected error occurred' };
     }
   },
 
-  // Update profile picture specifically
-  async updateProfilePicture(userId, profilePictureUrl) {
-    try {
-      console.log('ProfileService: Updating profile picture for user:', userId);
-      const now = new Date().toISOString();
-      const { data, error } = await supabase
-        .from(table)
-        .update({ 
-          profile_picture_url: profilePictureUrl,
-          updated_at: now 
-        })
-        .eq('user_id', userId)
-        .select()
-        .maybeSingle();
-
-      if (error) {
-        console.error('ProfileService: Error updating profile picture:', error);
-        return { success: false, error: error.message };
-      }
-      
-      console.log('ProfileService: Profile picture updated successfully');
-      return { success: true, data };
-    } catch (err) {
-      console.error('ProfileService: Exception updating profile picture:', err);
-      return { success: false, error: err.message };
-    }
-  },
-
-  // Remove profile picture
-  async removeProfilePicture(userId) {
-    try {
-      console.log('ProfileService: Removing profile picture for user:', userId);
-      const now = new Date().toISOString();
-      const { data, error } = await supabase
-        .from(table)
-        .update({ 
-          profile_picture_url: null,
-          updated_at: now 
-        })
-        .eq('user_id', userId)
-        .select()
-        .maybeSingle();
-
-      if (error) {
-        console.error('ProfileService: Error removing profile picture:', error);
-        return { success: false, error: error.message };
-      }
-      
-      console.log('ProfileService: Profile picture removed successfully');
-      return { success: true, data };
-    } catch (err) {
-      console.error('ProfileService: Exception removing profile picture:', err);
-      return { success: false, error: err.message };
-    }
-  },
 
   // Check username availability
   async checkUsernameAvailability(username) {

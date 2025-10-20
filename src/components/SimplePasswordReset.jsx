@@ -67,11 +67,18 @@ const SimplePasswordReset = () => {
     }
   };
 
-  const copyPassword = () => {
+  const copyPassword = async () => {
     const tempPassword = localStorage.getItem('tempPassword');
     if (tempPassword) {
       navigator.clipboard.writeText(tempPassword);
-      alert('Password copied to clipboard!');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'success',
+        title: 'Copied!',
+        text: 'Password copied to clipboard!',
+        confirmButtonText: 'OK'
+      });
     }
   };
 

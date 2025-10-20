@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { useAdmin } from '../context/AdminContext';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from './ToastProvider';
 
 const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
   const { user, signUp, signIn, signInWithGoogle, validateEmail, validatePassword, resetPasswordForEmail } = useSupabaseAuth();
   const { adminSignIn, isAdmin } = useAdmin();
   const navigate = useNavigate();
+  const toast = useToast();
   
   // Form state
   const [isSignUp, setIsSignUp] = useState(initialMode === 'signup');
@@ -18,9 +20,6 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
   // Validation state
   const [validationErrors, setValidationErrors] = useState({});
   const [passwordStrength, setPasswordStrength] = useState(null);
-  
-  // Toast notification state
-  const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
 
   
   // Forgot password modal state
@@ -46,14 +45,6 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
       navigate('/admin/dashboard');
     }
   }, [isAdmin, navigate]);
-
-  // Toast notification helper
-  const showToast = (message, type = 'info') => {
-    setToast({ show: true, message, type });
-    setTimeout(() => {
-      setToast({ show: false, message: '', type: 'info' });
-    }, 5000);
-  };
 
   // Clear form and errors
   const clearForm = () => {
@@ -86,11 +77,6 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
 
   const handlePasswordChange = async (value) => {
     setPassword(value);
-    
-    // Clear any existing error messages when user starts typing
-    if (toast.show && toast.type === 'error') {
-      setToast({ show: false, message: '', type: 'info' });
-    }
     
     if (value.length > 0) {
       try {
@@ -143,7 +129,7 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
         if (result.success) {
           navigate('/admin/dashboard');
         } else {
-          showToast(result.error || 'Admin authentication failed', 'error');
+          toast.error(result.error || 'Admin authentication failed');
         }
         return;
       }
@@ -169,13 +155,13 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
             errorMessage = `Signup failed: ${errorString}`;
           }
           
-          showToast(errorMessage, 'error');
+          toast.error(errorMessage);
           setLoading(false);
           return;
         }
         
         const successMessage = message || 'Account created successfully! Please check your email for confirmation.';
-        showToast(successMessage, 'success');
+        toast.success(successMessage);
         clearForm();
       } else {
         const { user: loggedInUser, error } = await signIn(email, password);
@@ -196,28 +182,30 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
             errorMessage = 'Too many login attempts. Please wait a few minutes before trying again.';
           }
           
-          showToast(errorMessage, 'error');
+          toast.error(errorMessage);
           setLoading(false);
           return;
         }
 
         // Successful login - redirect based on onboarding status
         if (loggedInUser) {
-          showToast('Login successful! Redirecting...', 'success');
+          toast.success('Login successful! Redirecting...');
           if (loggedInUser.user_metadata?.onboarding_completed) {
             navigate('/dashboard');
           } else {
             navigate('/questionnaire');
           }
         } else {
-          showToast('Login failed: No user returned', 'error');
+          toast.error('Login failed: No user returned');
           setLoading(false);
         }
       }
     } catch (error) {
       console.error('Authentication error:', error);
       const errorMsg = error.message || 'An unexpected error occurred during authentication';
-      showToast(errorMsg, 'error');
+      toast.error(errorMsg);
+      setLoading(false);
+    } finally {
       setLoading(false);
     }
   };
@@ -228,7 +216,7 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
     try {
       // Check if Supabase is properly configured
       if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
-        showToast('Supabase configuration is missing. Please check your environment variables.', 'error');
+        toast.error('Supabase configuration is missing. Please check your environment variables.');
         setLoading(false);
         return;
       }
@@ -259,12 +247,12 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
           errorMessage = `Google sign-in failed: ${errorMsg}`;
         }
         
-        showToast(errorMessage, 'error');
+        toast.error(errorMessage);
         setLoading(false);
         return;
       }
 
-      showToast('Redirecting to Google...', 'info');
+      toast.info('Redirecting to Google...');
       // Note: Supabase will handle the redirect automatically
 
     } catch (error) {
@@ -279,7 +267,7 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
         errorMsg = `Google sign-in failed: ${error.message}`;
       }
       
-      showToast(errorMsg, 'error');
+      toast.error(errorMsg);
       setLoading(false);
     }
   };
@@ -330,66 +318,6 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
 
   return (
     <>
-      {/* Toast Notification - Simplified and more visible */}
-      {toast.show && (
-        <div 
-          style={{
-            position: 'fixed',
-            top: '20px',
-            right: '20px',
-            zIndex: 9999,
-            backgroundColor: toast.type === 'error' ? '#fef2f2' : toast.type === 'success' ? '#f0fdf4' : '#eff6ff',
-            color: toast.type === 'error' ? '#dc2626' : toast.type === 'success' ? '#16a34a' : '#2563eb',
-            border: `2px solid ${toast.type === 'error' ? '#fca5a5' : toast.type === 'success' ? '#86efac' : '#93c5fd'}`,
-            borderRadius: '8px',
-            padding: '16px',
-            maxWidth: '400px',
-            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-            animation: 'slideInRight 0.3s ease-out'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              {toast.type === 'error' ? (
-                <span style={{ marginRight: '8px', fontSize: '16px' }}>❌</span>
-              ) : toast.type === 'success' ? (
-                <span style={{ marginRight: '8px', fontSize: '16px' }}>✅</span>
-              ) : (
-                <span style={{ marginRight: '8px', fontSize: '16px' }}>ℹ️</span>
-              )}
-              <span style={{ fontWeight: '500', fontSize: '14px' }}>{toast.message}</span>
-            </div>
-            <button
-              onClick={() => setToast({ show: false, message: '', type: 'info' })}
-              style={{
-                marginLeft: '12px',
-                background: 'none',
-                border: 'none',
-                fontSize: '18px',
-                cursor: 'pointer',
-                color: '#6b7280'
-              }}
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* CSS Animation */}
-      <style jsx>{`
-        @keyframes slideInRight {
-          from {
-            transform: translateX(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
-      `}</style>
-
       {/* Forgot Password Modal */}
       {showForgotPasswordModal && (
         <div 

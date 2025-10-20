@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import { useNavigate } from 'react-router-dom';
+import { clearAuthState } from '../utils/clearAuthState';
 
 const AdminLogin = () => {
   const { adminSignIn, loading } = useAdmin();
@@ -136,12 +137,24 @@ const AdminLogin = () => {
             <p className="text-gray-400 text-sm">
               Authorized personnel only
             </p>
-            <button
-              onClick={() => navigate('/')}
-              className="text-purple-400 hover:text-purple-300 text-sm mt-2 transition-colors duration-200"
-            >
-              ← Back to Main App
-            </button>
+            <div className="flex justify-center space-x-4 mt-2">
+              <button
+                onClick={() => navigate('/')}
+                className="text-purple-400 hover:text-purple-300 text-sm transition-colors duration-200"
+              >
+                ← Back to Main App
+              </button>
+              <button
+                onClick={() => {
+                  clearAuthState();
+                  window.location.reload();
+                }}
+                className="text-red-400 hover:text-red-300 text-sm transition-colors duration-200"
+                title="Clear all auth state and reload"
+              >
+                🔄 Reset Auth
+              </button>
+            </div>
           </div>
         </div>
 

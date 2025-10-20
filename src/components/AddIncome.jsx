@@ -142,7 +142,7 @@ const AddIncome = ({ onIncomeAdded, onClose }) => {
       const fileName = `${user.id}/${Date.now()}.${fileExt}`;
       
       const { data, error } = await supabase.storage
-        .from('receipts')
+        .from('receipts-v2')
         .upload(fileName, file);
 
       if (error) {
@@ -151,7 +151,7 @@ const AddIncome = ({ onIncomeAdded, onClose }) => {
       }
 
       const { data: { publicUrl } } = supabase.storage
-        .from('receipts')
+        .from('receipts-v2')
         .getPublicUrl(fileName);
 
       return publicUrl;
@@ -316,7 +316,13 @@ const AddIncome = ({ onIncomeAdded, onClose }) => {
                 onChange={(e) => handleInputChange('date', e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 required
+                max={new Date().toISOString().split('T')[0]}
+                min={new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0]}
+                title="Select a date within the last year (from 1 year ago to today)"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Cannot be in the future or more than 1 year ago (from {new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toLocaleDateString()} to today)
+              </p>
             </div>
 
             {/* Payment Method */}

@@ -56,13 +56,6 @@ const ProfileDropdown = () => {
     return name.substring(0, 2).toUpperCase();
   };
 
-  // Get profile picture URL
-  const getProfilePicture = () => {
-    if (profile?.profile_picture_url) {
-      return profile.profile_picture_url;
-    }
-    return null;
-  };
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -72,17 +65,9 @@ const ProfileDropdown = () => {
         className="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-100 transition-colors"
       >
         {/* Profile Avatar */}
-        {getProfilePicture() ? (
-          <img
-            src={getProfilePicture()}
-            alt="Profile"
-            className="w-8 h-8 rounded-full object-cover"
-          />
-        ) : (
-          <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-green-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
-            {getInitials()}
-          </div>
-        )}
+        <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-green-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
+          {getInitials()}
+        </div>
         
         {/* Username */}
         <div className="hidden md:block text-left">

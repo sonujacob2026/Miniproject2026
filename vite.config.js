@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0', // Allow external access
-    port: 5173, // Your current port
+    port: 5174, // Match backend CORS configuration
     strictPort: true, // Use exact port
     open: true, // Open browser automatically
   },

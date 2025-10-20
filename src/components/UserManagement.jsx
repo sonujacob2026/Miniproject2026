@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAdmin } from '../context/AdminContext';
+import CreateUserModal from './CreateUserModal';
 
 const UserManagement = () => {
   const { getAuthUsers, updateUserProfile, deleteUser } = useAdmin();
@@ -7,6 +8,7 @@ const UserManagement = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   useEffect(() => {
     loadUsers();
@@ -15,12 +17,21 @@ const UserManagement = () => {
   const loadUsers = async () => {
     try {
       setLoading(true);
+      console.log('UserManagement: Loading users...');
+      
       const result = await getAuthUsers();
+      console.log('UserManagement: getAuthUsers result:', result);
+      
       if (result.success) {
         setUsers(result.users);
+        console.log('UserManagement: Loaded', result.users.length, 'users');
+      } else {
+        console.error('UserManagement: Failed to load users:', result.error);
+        setUsers([]); // Clear users on error
       }
     } catch (error) {
-      console.error('Error loading users:', error);
+      console.error('UserManagement: Error loading users:', error);
+      setUsers([]);
     } finally {
       setLoading(false);
     }
@@ -123,6 +134,9 @@ const UserManagement = () => {
             ))}
           </div>
         </div>
+        <div className="mt-6 text-center text-gray-500 text-sm">
+          Loading user management... Check browser console if this persists.
+        </div>
       </div>
     );
   }
@@ -143,6 +157,12 @@ const UserManagement = () => {
                 className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
               >
                 Refresh Users
+              </button>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200"
+              >
+                Create User
               </button>
             </div>
           </div>
@@ -278,6 +298,16 @@ const UserManagement = () => {
           </div>
         )}
       </div>
+
+      {/* Create User Modal */}
+      <CreateUserModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onUserCreated={() => {
+          setShowCreateModal(false);
+          loadUsers(); // Refresh the user list
+        }}
+      />
 
     </div>
   );

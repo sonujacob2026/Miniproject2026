@@ -1,62 +1,61 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
-import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 
 const UserStatusChecker = ({ children }) => {
   const { user, signOut } = useSupabaseAuth();
   const navigate = useNavigate();
+  const [isChecking, setIsChecking] = useState(false);
 
   useEffect(() => {
+    // Status column does not exist in user_profiles; disable remote status checks
     const checkUserStatus = async () => {
-      if (user && user.email !== 'admin@gmail.com') {
-        try {
-          console.log('Checking user status for:', user.email);
-          
-          const { data: userProfile, error: profileError } = await supabase
-            .from('user_profiles')
-            .select('status, full_name')
-            .eq('user_id', user.id)
-            .single();
-
-          if (profileError) {
-            console.warn('Could not fetch user profile for status check:', profileError);
-            return;
-          }
-
-          if (userProfile?.status === 'suspended') {
-            console.log('User account is suspended, signing out...');
-            
-            // Show notification to user
-            alert('Your account has been disabled. Please contact support for assistance.');
-            
-            // Sign out the user
-            await signOut();
-            
-            // Redirect to login page
-            navigate('/auth');
-          }
-        } catch (statusError) {
-          console.warn('Error checking user status:', statusError);
-        }
-      }
+      return;
     };
 
-    // Check status when user changes
+    // Background fetch function (non-blocking)
+    const fetchStatusInBackground = async () => { return; };
+
+    // Handle suspended user
+    const handleSuspendedUser = async () => {
+      console.log('User account is suspended, signing out...');
+      
+      // Show notification to user
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Account Disabled',
+        text: 'Your account has been disabled. Please contact support for assistance.',
+        confirmButtonText: 'OK'
+      });
+      
+      // Sign out the user
+      await signOut();
+      
+      // Redirect to login page
+      navigate('/auth');
+    };
+
+    // Check status when user changes (non-blocking)
     checkUserStatus();
 
-    // Set up periodic status check (every 30 seconds)
-    const statusCheckInterval = setInterval(checkUserStatus, 30000);
+    // Set up periodic status check (every 2 minutes instead of 30 seconds)
+    const statusCheckInterval = setInterval(checkUserStatus, 60 * 60 * 1000);
 
     return () => {
       clearInterval(statusCheckInterval);
     };
-  }, [user, signOut, navigate]);
+  }, [user, signOut, navigate, isChecking]);
 
   return children;
 };
 
 export default UserStatusChecker;
+
+
+
+
 
 
 

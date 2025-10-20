@@ -58,7 +58,14 @@ const RecurringExpensesManager = ({ refreshKey = 0 }) => {
     e.preventDefault();
     
     if (!formData.name || !formData.amount || !formData.category || !formData.nextDueDate) {
-      alert('Please fill in all required fields');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'warning',
+        title: 'Missing Information',
+        text: 'Please fill in all required fields',
+        confirmButtonText: 'OK'
+      });
       return;
     }
 
@@ -84,7 +91,14 @@ const RecurringExpensesManager = ({ refreshKey = 0 }) => {
 
       if (error) {
         console.error('Error adding recurring expense:', error);
-        alert('Error adding recurring expense. Please try again.');
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Error adding recurring expense. Please try again.',
+          confirmButtonText: 'OK'
+        });
       } else {
         console.log('Recurring expense added successfully:', data);
         setShowAddForm(false);
@@ -98,11 +112,25 @@ const RecurringExpensesManager = ({ refreshKey = 0 }) => {
           isActive: true
         });
         loadRecurringExpenses();
-        alert('Recurring expense added successfully!');
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'success',
+          title: 'Success',
+          text: 'Recurring expense added successfully!',
+          confirmButtonText: 'OK'
+        });
       }
     } catch (error) {
       console.error('Exception adding recurring expense:', error);
-      alert('Error adding recurring expense. Please try again.');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Error adding recurring expense. Please try again.',
+        confirmButtonText: 'OK'
+      });
     }
   };
 
@@ -131,21 +159,43 @@ const RecurringExpensesManager = ({ refreshKey = 0 }) => {
 
       if (error) {
         console.error('Error marking as paid:', error);
-        alert('Error marking as paid. Please try again.');
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Error marking as paid. Please try again.',
+          confirmButtonText: 'OK'
+        });
       } else {
         try { window.Swal && window.Swal.fire({ icon: 'success', title: 'Payment recorded', text: 'Expense marked as paid!' }); } catch {}
         loadRecurringExpenses();
       }
     } catch (error) {
       console.error('Exception marking as paid:', error);
-      alert('Error marking as paid. Please try again.');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Error marking as paid. Please try again.',
+        confirmButtonText: 'OK'
+      });
     }
   };
 
   const deleteRecurringExpense = async (expenseId) => {
-    if (!confirm('Are you sure you want to delete this recurring expense?')) {
-      return;
-    }
+    const { getSwal } = await import('../lib/swal');
+    const Swal = await getSwal();
+    const res = await Swal.fire({
+      icon: 'warning',
+      title: 'Delete Recurring Expense?',
+      text: 'Are you sure you want to delete this recurring expense?',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, delete',
+      cancelButtonText: 'Cancel'
+    });
+    if (!res.isConfirmed) return;
 
     try {
       const { error } = await supabase
@@ -155,14 +205,35 @@ const RecurringExpensesManager = ({ refreshKey = 0 }) => {
 
       if (error) {
         console.error('Error deleting recurring expense:', error);
-        alert('Error deleting recurring expense. Please try again.');
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Error deleting recurring expense. Please try again.',
+          confirmButtonText: 'OK'
+        });
       } else {
-        alert('Recurring expense deleted successfully!');
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'success',
+          title: 'Success',
+          text: 'Recurring expense deleted successfully!',
+          confirmButtonText: 'OK'
+        });
         loadRecurringExpenses();
       }
     } catch (error) {
       console.error('Exception deleting recurring expense:', error);
-      alert('Error deleting recurring expense. Please try again.');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Error deleting recurring expense. Please try again.',
+        confirmButtonText: 'OK'
+      });
     }
   };
 
@@ -185,17 +256,24 @@ const RecurringExpensesManager = ({ refreshKey = 0 }) => {
       // Check if payment system is configured
       if (!isPaymentSystemConfigured()) {
         // Demo mode - simulate payment
-        const confirmed = confirm(
-          `Demo Payment Mode\n\n` +
-          `Expense: ${expense.description}\n` +
-          `Amount: ₹${expense.amount}\n\n` +
-          `This is a demo payment. In production, this would open Razorpay checkout.\n\n` +
-          `Would you like to mark this as paid?`
-        );
-        
-        if (confirmed) {
+        const resDemo = await Swal.fire({
+          icon: 'question',
+          title: 'Demo Payment Mode',
+          html: `Expense: <b>${expense.description}</b><br/>Amount: ₹${expense.amount}<br/><br/>This is a demo payment. In production, this would open Razorpay checkout.<br/><br/>Mark as paid?`,
+          showCancelButton: true,
+          confirmButtonText: 'Mark as paid',
+          cancelButtonText: 'Cancel'
+        });
+        if (resDemo.isConfirmed) {
           await markAsPaid(expense.id);
-          alert('Demo payment completed! Expense marked as paid.');
+          const { getSwal } = await import('../lib/swal');
+          const Swal = await getSwal();
+          await Swal.fire({
+            icon: 'success',
+            title: 'Payment Completed',
+            text: 'Demo payment completed! Expense marked as paid.',
+            confirmButtonText: 'OK'
+          });
         }
         return;
       }
@@ -208,7 +286,14 @@ const RecurringExpensesManager = ({ refreshKey = 0 }) => {
       });
 
       if (!success) {
-        alert(message || 'Failed to create order');
+        const { getSwal } = await import('../lib/swal');
+        const Swal = await getSwal();
+        await Swal.fire({
+          icon: 'error',
+          title: 'Order Failed',
+          text: message || 'Failed to create order',
+          confirmButtonText: 'OK'
+        });
         return;
       }
 
@@ -222,7 +307,14 @@ const RecurringExpensesManager = ({ refreshKey = 0 }) => {
       loadRecurringExpenses();
     } catch (e) {
       console.error('Payment error:', e);
-      alert(e.message || 'Payment failed or cancelled');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'error',
+        title: 'Payment Failed',
+        text: e.message || 'Payment failed or cancelled',
+        confirmButtonText: 'OK'
+      });
     }
   };
 

@@ -26,6 +26,8 @@ import UserProfile from './components/UserProfile'
 import AdminLogin from './components/AdminLogin'
 import AdminDashboard from './components/AdminDashboard'
 import AdminTest from './components/AdminTest'
+import AdminDebug from './components/AdminDebug'
+import ExpenseCategoriesAdmin from './components/ExpenseCategoriesAdmin'
 import SystemSettings from './components/SystemSettings'
 import UserStatusChecker from './components/UserStatusChecker'
 
@@ -155,7 +157,9 @@ const AppRoutes = () => {
       <Route path="/admin/login" element={<AdminLogin />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
       <Route path="/admin/settings" element={<SystemSettings />} />
+      <Route path="/admin/categories" element={<ExpenseCategoriesAdmin />} />
       <Route path="/admin/test" element={<AdminTest />} />
+      <Route path="/admin/debug" element={<AdminDebug />} />
       <Route path="/admin" element={<Navigate to="/admin/login" />} />
       </Routes>
     </UserStatusChecker>

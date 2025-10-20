@@ -89,10 +89,17 @@ const ExpenseList = ({ expenses, onDelete, onEdit }) => {
   };
 
   // Trigger payment via UPI deep link
-  const handlePay = (expense) => {
+  const handlePay = async (expense) => {
     const upiId = expense.upiId || import.meta.env.VITE_DEFAULT_UPI_ID;
     if (!upiId) {
-      alert('UPI ID not configured. Please set VITE_DEFAULT_UPI_ID in your .env or provide expense.upiId');
+      const { getSwal } = await import('../lib/swal');
+      const Swal = await getSwal();
+      await Swal.fire({
+        icon: 'warning',
+        title: 'UPI Configuration Missing',
+        text: 'UPI ID not configured. Please set VITE_DEFAULT_UPI_ID in your .env or provide expense.upiId',
+        confirmButtonText: 'OK'
+      });
       return;
     }
     const payeeName = import.meta.env.VITE_UPI_PAYEE_NAME || 'ExpenseAI';

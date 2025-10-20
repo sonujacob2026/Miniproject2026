@@ -8,19 +8,22 @@ import FinancialInsights from './FinancialInsights';
 import BudgetRecommendations from './BudgetRecommendations';
 import FinancialGoalsDisplay from './FinancialGoalsDisplay';
 import HouseholdExpenseForm from './HouseholdExpenseForm';
+import AddIncomeForm from './AddIncomeForm';
 import UnifiedNavbar from './UnifiedNavbar';
 import SmoothLoader from './SmoothLoader';
-import SkeletonLoader from './SkeletonLoader';
-import AddIncome from './AddIncome';
+import ProfileSkeleton from './ProfileSkeleton';
+import DataValidationAlert from './DataValidationAlert';
 
 import HouseholdExpenseDashboard from './HouseholdExpenseDashboard';
 import BudgetOverview from './BudgetOverview';
 import GoalsModal from './GoalsModal';
+import ExpenseChangeIndicator from './ExpenseChangeIndicator';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, signOut } = useSupabaseAuth();
   const { profile, loading: profileLoading, refreshProfile } = useProfile();
+  const [showDataAlert, setShowDataAlert] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showAddIncome, setShowAddIncome] = useState(false);
   const [expenses, setExpenses] = useState([]);
@@ -33,8 +36,24 @@ const Dashboard = () => {
   });
   const onboardingIncomplete = !(profile?.onboarding_completed || user?.user_metadata?.onboarding_completed);
   
-  // Debug logging (reduced for performance)
-  // console.log('Dashboard: user:', user?.id, 'profile:', profile?.id, 'profileLoading:', profileLoading);
+  // Debug logging
+  console.log('Dashboard: user:', user?.id, 'profile:', profile?.id, 'profileLoading:', profileLoading, 'onboardingIncomplete:', onboardingIncomplete);
+  console.log('Dashboard: profile.onboarding_completed:', profile?.onboarding_completed, 'user.user_metadata.onboarding_completed:', user?.user_metadata?.onboarding_completed);
+
+  // Check for incomplete profile data
+  useEffect(() => {
+    if (profile && !profileLoading) {
+      const requiredFields = ['user_id', 'full_name', 'email'];
+      const isIncomplete = !requiredFields.every(field => 
+        profile[field] !== undefined && profile[field] !== null && profile[field] !== ''
+      );
+      
+      if (isIncomplete) {
+        setShowDataAlert(true);
+        console.warn('Dashboard: Profile data is incomplete, showing alert');
+      }
+    }
+  }, [profile, profileLoading]);
 
   useEffect(() => {
     loadExpenses();
@@ -86,7 +105,7 @@ const Dashboard = () => {
     localStorage.setItem('expenseai_expenses', JSON.stringify(expenses));
   }, [expenses]);
 
-  // Disable background scroll (html + body) when the add-expense modal is open
+  // Disable background scroll (html + body) when modals are open
   useEffect(() => {
     const { body, documentElement } = document;
     const prevBodyOverflow = body.style.overflow;
@@ -95,7 +114,7 @@ const Dashboard = () => {
 
     const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
 
-    if (showAddExpense) {
+    if (showAddExpense || showAddIncome) {
       // Prevent background scroll
       body.style.overflow = 'hidden';
       documentElement.style.overflow = 'hidden';
@@ -114,7 +133,7 @@ const Dashboard = () => {
       documentElement.style.overflow = prevHtmlOverflow || '';
       body.style.paddingRight = prevBodyPaddingRight || '';
     };
-  }, [showAddExpense]);
+  }, [showAddExpense, showAddIncome]);
 
   const addExpense = (newExpense) => {
     const expense = {
@@ -155,19 +174,31 @@ const Dashboard = () => {
   // Force redirect if no user
   useEffect(() => {
     if (!user) {
+      console.log('Dashboard: No user, redirecting to auth');
       navigate('/auth');
     }
   }, [user, navigate]);
 
 
   // Show loader if no user or profile is loading
-  if (!user) {
-    return <SkeletonLoader type="simple" />;
+  if (!user || profileLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">
+            { !user ? 'Redirecting to sign in...' : 'Loading your dashboard...' }
+          </p>
+        </div>
+      </div>
+    );
   }
-  
-  if (profileLoading) {
-    return <SkeletonLoader type="dashboard" />;
-  }
+
+  // Handle data validation
+  const handleRetryData = async () => {
+    setShowDataAlert(false);
+    await refreshProfile();
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -176,6 +207,14 @@ const Dashboard = () => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Data Validation Alert */}
+        {showDataAlert && (
+          <DataValidationAlert 
+            onRetry={handleRetryData}
+            onDismiss={() => setShowDataAlert(false)}
+          />
+        )}
+
         {/* Welcome Section */}
         <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-8 text-white mb-8">
           <h1 className="text-3xl font-bold mb-2">Welcome to your Financial Dashboard!</h1>
@@ -222,7 +261,9 @@ const Dashboard = () => {
         )}
 
         {/* Profile Summary */}
-        {profile && (
+        {profileLoading && !profile ? (
+          <ProfileSkeleton />
+        ) : profile && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
               <div className="flex items-center">
@@ -297,10 +338,10 @@ const Dashboard = () => {
 
           <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Add Income</h3>
-            <p className="text-gray-600 mb-4">Record additional income sources</p>
+            <p className="text-gray-600 mb-4">Record a new income transaction</p>
             <button
               onClick={() => setShowAddIncome(true)}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-4 rounded-lg transition-colors"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors"
             >
               Add Income
             </button>
@@ -309,13 +350,13 @@ const Dashboard = () => {
           <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">View Budget</h3>
             <p className="text-gray-600 mb-4">Check your monthly budget status</p>
-            <button onClick={() => setShowBudget(true)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors">View Budget</button>
+            <button onClick={() => setShowBudget(true)} className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg transition-colors">View Budget</button>
           </div>
 
           <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Financial Goals</h3>
             <p className="text-gray-600 mb-4">Track your savings and goals</p>
-            <button onClick={() => setShowGoals(true)} className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg transition-colors">View Goals</button>
+            <button onClick={() => setShowGoals(true)} className="w-full bg-orange-600 hover:bg-orange-700 text-white py-2 px-4 rounded-lg transition-colors">View Goals</button>
           </div>
         </div>
 
@@ -374,6 +415,21 @@ const Dashboard = () => {
         </div>
       )}
 
+      {/* Add Income Modal */}
+      {showAddIncome && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="max-w-4xl w-full max-h-[90vh] overflow-auto">
+            <AddIncomeForm
+              onIncomeAdded={(income) => {
+                // You can add income handling logic here if needed
+                console.log('Income added:', income);
+              }}
+              onClose={() => setShowAddIncome(false)}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Budget Overview Modal */}
       {showBudget && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -391,16 +447,8 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Add Income Modal */}
-      {showAddIncome && (
-        <AddIncome
-          onIncomeAdded={(income) => {
-            console.log('Income added:', income);
-            // You can add logic here to refresh income data if needed
-          }}
-          onClose={() => setShowAddIncome(false)}
-        />
-      )}
+      {/* Expense Change Indicator */}
+      <ExpenseChangeIndicator expenses={expenses} showOnRefresh={true} />
     </div>
   );
 };

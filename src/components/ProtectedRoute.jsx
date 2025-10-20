@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
-import { supabase } from '../lib/supabase';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading, signOut } = useSupabaseAuth();
@@ -10,27 +9,7 @@ const ProtectedRoute = ({ children }) => {
 
   useEffect(() => {
     const checkUserStatus = async () => {
-      if (user && user.email !== 'admin@gmail.com') {
-        try {
-          const { data: userProfile, error: profileError } = await supabase
-            .from('user_profiles')
-            .select('status')
-            .eq('user_id', user.id)
-            .single();
-
-          if (profileError) {
-            console.warn('Could not fetch user profile in ProtectedRoute:', profileError);
-          } else if (userProfile?.status === 'suspended') {
-            console.log('User is suspended, blocking access to protected route');
-            setIsSuspended(true);
-            // Sign out the user
-            await signOut();
-            return;
-          }
-        } catch (statusError) {
-          console.warn('Error checking user status in ProtectedRoute:', statusError);
-        }
-      }
+      // Status column not present; skip remote checks and allow route
       setStatusCheckLoading(false);
     };
 

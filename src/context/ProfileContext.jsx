@@ -16,66 +16,115 @@ export const ProfileProvider = ({ children }) => {
   const { user } = useSupabaseAuth();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
 
-  // Load profile when user changes
+  // Load profile when user changes - use cached data first, then fetch fresh
   useEffect(() => {
     const loadProfile = async () => {
       if (user?.id) {
-        // Check if this is an admin user
+        // Check if this is an admin user (only if admin mode is explicitly active)
         const isAdminMode = localStorage.getItem('admin_mode') === 'true';
         const isAdminUser = user.email === 'admin@gmail.com';
-        
-        if (isAdminMode || isAdminUser) {
-          console.log('ProfileContext: Admin user detected, skipping profile load');
+
+        if (isAdminMode && isAdminUser) {
+          console.log('ProfileContext: Admin user detected, creating basic profile');
+          // Create a basic profile for admin users
+          const adminProfile = {
+            user_id: user.id,
+            full_name: 'System Administrator',
+            email: user.email,
+            onboarding_completed: true,
+            household_members: 1,
+            monthly_income: 0,
+            has_debt: false,
+            debt_amount: 0,
+            savings_goal: '',
+            primary_expenses: [],
+            budgeting_experience: 'expert',
+            financial_goals: []
+          };
+          setProfile(adminProfile);
+          setOnboardingCompleted(true);
           setLoading(false);
           return;
         }
+
+        // OPTIMIZATION: Load cached profile immediately for instant display
+        const cachedProfile = localStorage.getItem(`profile_${user.id}`);
+        let hasCachedProfile = false;
         
-        // console.log('ProfileContext: Loading profile for user:', user.id);
-        setLoading(true);
-        
-        // Set a timeout to prevent infinite loading
-        const timeoutId = setTimeout(() => {
-          console.warn('ProfileContext: Profile load timeout, setting loading to false');
-          setLoading(false);
-        }, 3000); // 3 second timeout
-        
+        if (cachedProfile) {
+          try {
+            const parsed = JSON.parse(cachedProfile);
+            const cacheAge = Date.now() - (parsed._cached_at || 0);
+            
+            // Use cache if less than 5 minutes old
+            if (cacheAge < 5 * 60 * 1000) {
+              console.log('ProfileContext: Using cached profile for instant load');
+              setProfile(parsed);
+              setOnboardingCompleted(parsed?.onboarding_completed || false);
+              setLoading(false);
+              hasCachedProfile = true;
+            }
+          } catch (error) {
+            console.error('ProfileContext: Error parsing cached profile:', error);
+            localStorage.removeItem(`profile_${user.id}`);
+          }
+        }
+
+        // Fetch fresh data in background (non-blocking)
         try {
+          if (!hasCachedProfile) {
+            setLoading(true);
+          }
+          setRefreshing(hasCachedProfile); // Show refresh indicator if using cache
+          
           const result = await ProfileService.getProfile(user.id);
-          clearTimeout(timeoutId);
-          // console.log('ProfileContext: Profile load result:', result);
-          if (result.success) {
-            if (result.data) {
+          
+          if (result.success && result.data) {
+            // Validate data completeness
+            const requiredFields = ['user_id', 'full_name', 'email'];
+            const isValid = requiredFields.every(field => 
+              result.data[field] !== undefined && result.data[field] !== null
+            );
+            
+            if (isValid) {
               setProfile(result.data);
               setOnboardingCompleted(result.data?.onboarding_completed || false);
-              console.log('ProfileContext: Profile loaded successfully, onboarding_completed:', result.data?.onboarding_completed);
-            } else {
-              // Profile doesn't exist yet, create a basic one for new users
-              console.log('ProfileContext: No profile found, creating basic profile for new user');
-              const basicProfile = {
-                user_id: user.id,
-                full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-                email: user.email,
-                onboarding_completed: false,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
+              
+              // Cache the fresh data
+              const dataToCache = {
+                ...result.data,
+                _cached_at: Date.now()
               };
-              setProfile(basicProfile);
-              setOnboardingCompleted(false);
+              localStorage.setItem(`profile_${user.id}`, JSON.stringify(dataToCache));
+              
+              console.log('ProfileContext: Profile loaded and validated successfully');
+            } else {
+              console.error('ProfileContext: Profile data is incomplete, missing required fields');
+              if (!hasCachedProfile) {
+                setProfile(null);
+                setOnboardingCompleted(false);
+              }
             }
           } else {
-            console.log('ProfileContext: Profile load failed:', result.error);
+            console.error('ProfileContext: Failed to load profile:', result.error);
+            if (!hasCachedProfile) {
+              setProfile(null);
+              setOnboardingCompleted(false);
+            }
+          }
+        } catch (error) {
+          console.error('ProfileContext: Error during profile loading:', error);
+          if (!hasCachedProfile) {
             setProfile(null);
             setOnboardingCompleted(false);
           }
-        } catch (error) {
-          clearTimeout(timeoutId);
-          console.error('ProfileContext: Error loading profile:', error);
-          setProfile(null);
-          setOnboardingCompleted(false);
         } finally {
           setLoading(false);
+          setRefreshing(false);
         }
       } else {
         // console.log('ProfileContext: No user ID, clearing profile');
@@ -100,6 +149,13 @@ export const ProfileProvider = ({ children }) => {
       if (result.success) {
         setProfile(result.data);
         setOnboardingCompleted(true);
+        
+        // Update cache
+        const dataToCache = {
+          ...result.data,
+          _cached_at: Date.now()
+        };
+        localStorage.setItem(`profile_${user.id}`, JSON.stringify(dataToCache));
       }
       return result;
     } catch (error) {
@@ -116,18 +172,25 @@ export const ProfileProvider = ({ children }) => {
       return { success: false, error: 'No user ID available' };
     }
 
-    setLoading(true);
+    setUpdating(true);
     try {
       const result = await ProfileService.updateProfile(user.id, updates);
       if (result.success) {
         setProfile(result.data);
+        
+        // Update cache
+        const dataToCache = {
+          ...result.data,
+          _cached_at: Date.now()
+        };
+        localStorage.setItem(`profile_${user.id}`, JSON.stringify(dataToCache));
       }
       return result;
     } catch (error) {
       console.error('Error updating profile:', error);
       return { success: false, error: error.message };
     } finally {
-      setLoading(false);
+      setUpdating(false);
     }
   };
 
@@ -166,17 +229,29 @@ export const ProfileProvider = ({ children }) => {
   // Refresh profile data
   const refreshProfile = async () => {
     if (user?.id) {
-      setLoading(true);
+      setUpdating(true);
       try {
         const result = await ProfileService.getProfile(user.id);
         if (result.success) {
           setProfile(result.data);
           setOnboardingCompleted(result.data?.onboarding_completed || false);
+          
+          // Update cache with fresh data
+          const dataToCache = {
+            ...result.data,
+            _cached_at: Date.now()
+          };
+          localStorage.setItem(`profile_${user.id}`, JSON.stringify(dataToCache));
+          
+          // Log if using stale cache due to timeout
+          if (result.fromCache && result.stale) {
+            console.warn('ProfileContext: refreshProfile using stale cached data due to database timeout');
+          }
         }
       } catch (error) {
         console.error('Error refreshing profile:', error);
       } finally {
-        setLoading(false);
+        setUpdating(false);
       }
     }
   };
@@ -184,6 +259,8 @@ export const ProfileProvider = ({ children }) => {
   const value = {
     profile,
     loading,
+    refreshing,
+    updating,
     onboardingCompleted,
     saveProfile,
     updateProfile,

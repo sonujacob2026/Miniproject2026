@@ -84,3 +84,9 @@ const SkeletonLoader = ({ type = 'dashboard' }) => {
 export default SkeletonLoader;
 
 
+
+
+
+
+
+
