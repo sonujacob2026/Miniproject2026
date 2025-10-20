@@ -7,7 +7,6 @@ class IncomeCategoriesService {
       const { data, error } = await supabase
         .from('income_categories')
         .select('*')
-        .eq('is_active', true)
         .order('name');
 
       if (error) throw error;
@@ -26,7 +25,6 @@ class IncomeCategoriesService {
         .from('income_categories')
         .select('id')
         .eq('name', categoryName)
-        .eq('is_active', true)
         .single();
 
       if (categoryError) throw categoryError;
@@ -36,13 +34,29 @@ class IncomeCategoriesService {
         .from('income_subcategories')
         .select('*')
         .eq('category_id', category.id)
-        .eq('is_active', true)
         .order('name');
 
       if (error) throw error;
       return data;
     } catch (error) {
       console.error('Error fetching income subcategories:', error);
+      throw error;
+    }
+  }
+
+  // Get subcategories by category ID (used by admin dashboard)
+  async getSubcategoriesByCategory(categoryId) {
+    try {
+      const { data, error } = await supabase
+        .from('income_subcategories')
+        .select('*')
+        .eq('category_id', categoryId)
+        .order('name');
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error fetching income subcategories by category:', error);
       throw error;
     }
   }
@@ -118,7 +132,7 @@ class IncomeCategoriesService {
     try {
       const { data, error } = await supabase
         .from('income_categories')
-        .update({ is_active: false })
+        .delete()
         .eq('id', id)
         .select();
 
@@ -135,7 +149,7 @@ class IncomeCategoriesService {
     try {
       const { data, error } = await supabase
         .from('income_subcategories')
-        .update({ is_active: false })
+        .delete()
         .eq('id', id)
         .select();
 

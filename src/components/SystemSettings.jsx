@@ -22,6 +22,10 @@ const SystemSettings = () => {
     newPassword: '',
     confirmPassword: ''
   });
+  const [passwordVisibility, setPasswordVisibility] = useState({
+    new: false,
+    confirm: false
+  });
   const [passwordErrors, setPasswordErrors] = useState({});
   const [activeSection, setActiveSection] = useState('general');
 
@@ -226,17 +230,40 @@ const SystemSettings = () => {
     
     // Clear errors when user starts typing
     if (passwordErrors[field]) {
-      setPasswordErrors({ ...passwordErrors, [field]: null });
+      const next = { ...passwordErrors };
+      delete next[field];
+      setPasswordErrors(next);
     }
 
     // Real-time validation for new password
     if (field === 'newPassword') {
       const validation = validatePassword(value);
+      const next = { ...passwordErrors };
       if (Object.keys(validation).length > 0) {
-        setPasswordErrors({ ...passwordErrors, newPassword: validation });
+        next.newPassword = validation;
       } else {
-        setPasswordErrors({ ...passwordErrors, newPassword: null });
+        delete next.newPassword;
       }
+      // keep confirm error in sync
+      if (passwordForm.confirmPassword) {
+        if (value !== passwordForm.confirmPassword) {
+          next.confirmPassword = 'Passwords do not match';
+        } else {
+          delete next.confirmPassword;
+        }
+      }
+      setPasswordErrors(next);
+    }
+
+    // Real-time validation for confirm password
+    if (field === 'confirmPassword') {
+      const next = { ...passwordErrors };
+      if (value !== passwordForm.newPassword) {
+        next.confirmPassword = 'Passwords do not match';
+      } else {
+        delete next.confirmPassword;
+      }
+      setPasswordErrors(next);
     }
   };
 
@@ -330,20 +357,89 @@ const SystemSettings = () => {
         }
       });
 
-      // Update password in Supabase Auth
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: passwordForm.newPassword
-      });
+      // First persist a hashed password into user_profiles. Only on success proceed to auth update (if applicable).
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id || null;
+        const userEmail = authData?.user?.email || adminUser?.email || 'admin@gmail.com';
 
-      if (updateError) {
+        const hashBuffer = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(passwordForm.newPassword));
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        const now = new Date().toISOString();
+
+        let dbErr = null;
+        if (userId) {
+          // Normal users: use user_id upsert path
+          const { error: upsertErr } = await supabase
+            .from('user_profiles')
+            .upsert({
+              user_id: userId,
+              email: userEmail,
+              password: hashHex,
+              password_updated_at: now,
+              updated_at: now
+            }, { onConflict: 'user_id' });
+          dbErr = upsertErr || null;
+        } else {
+          // Admin users (not authenticated in Supabase): update by email; insert if not exists
+          const { data: existing, error: findErr } = await supabase
+            .from('user_profiles')
+            .select('email')
+            .eq('email', userEmail)
+            .maybeSingle();
+          if (findErr) dbErr = findErr;
+          if (!dbErr) {
+            if (existing) {
+              const { error: updErr } = await supabase
+                .from('user_profiles')
+                .update({ password: hashHex, password_updated_at: now, updated_at: now })
+                .eq('email', userEmail);
+              dbErr = updErr || null;
+            } else {
+              const { error: insErr } = await supabase
+                .from('user_profiles')
+                .insert({ email: userEmail, password: hashHex, password_updated_at: now, created_at: now, updated_at: now });
+              dbErr = insErr || null;
+            }
+          }
+        }
+
+        if (dbErr) {
+          await Swal.fire({
+            icon: 'error',
+            title: 'Database Error',
+            text: 'Could not save password to database. Password change aborted.',
+            confirmButtonText: 'OK'
+          });
+          return;
+        }
+      } catch (persistErr) {
         await Swal.fire({
           icon: 'error',
           title: 'Error',
-          text: 'Failed to update password: ' + updateError.message,
+          text: 'Unable to store password in database. Password change aborted.',
           confirmButtonText: 'OK'
         });
         return;
       }
+
+      // If DB write succeeded, update password in Supabase Auth (only if a Supabase session exists)
+      try {
+        const { data: authData2 } = await supabase.auth.getSession();
+        if (authData2?.session?.user) {
+          const { error: updateError } = await supabase.auth.updateUser({ password: passwordForm.newPassword });
+          if (updateError) {
+            await Swal.fire({
+              icon: 'error',
+              title: 'Error',
+              text: 'Failed to update password in authentication service: ' + updateError.message,
+              confirmButtonText: 'OK'
+            });
+            return;
+          }
+        }
+      } catch (_) {}
 
       // Save password change record
       const success = await saveSettings({
@@ -582,15 +678,26 @@ const SystemSettings = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   New Password
                 </label>
-                <input
-                  type="password"
-                  value={passwordForm.newPassword}
-                  onChange={(e) => handlePasswordInputChange('newPassword', e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
-                    passwordErrors.newPassword ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                  placeholder="Enter new password"
-                />
+                <div className="relative">
+                  <input
+                    type={passwordVisibility.new ? 'text' : 'password'}
+                    value={passwordForm.newPassword}
+                    onChange={(e) => handlePasswordInputChange('newPassword', e.target.value)}
+                    className={`w-full pr-10 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                      passwordErrors.newPassword ? 'border-red-500' : 'border-gray-300'
+                    }`}
+                    placeholder="Enter new password"
+                  />
+                  <button
+                    type="button"
+                    aria-label={passwordVisibility.new ? 'Hide password' : 'Show password'}
+                    onClick={() => setPasswordVisibility(v => ({ ...v, new: !v.new }))}
+                    className="absolute inset-y-0 right-2 my-auto h-8 px-2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    title={passwordVisibility.new ? 'Hide' : 'Show'}
+                  >
+                    {passwordVisibility.new ? '🙈' : '👁️'}
+                  </button>
+                </div>
                 
                 {/* Password validation feedback */}
                 {passwordForm.newPassword && (
@@ -633,15 +740,26 @@ const SystemSettings = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Confirm New Password
                 </label>
-                <input
-                  type="password"
-                  value={passwordForm.confirmPassword}
-                  onChange={(e) => handlePasswordInputChange('confirmPassword', e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
-                    passwordErrors.confirmPassword ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                  placeholder="Confirm new password"
-                />
+                <div className="relative">
+                  <input
+                    type={passwordVisibility.confirm ? 'text' : 'password'}
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) => handlePasswordInputChange('confirmPassword', e.target.value)}
+                    className={`w-full pr-10 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                      passwordErrors.confirmPassword ? 'border-red-500' : 'border-gray-300'
+                    }`}
+                    placeholder="Confirm new password"
+                  />
+                  <button
+                    type="button"
+                    aria-label={passwordVisibility.confirm ? 'Hide password' : 'Show password'}
+                    onClick={() => setPasswordVisibility(v => ({ ...v, confirm: !v.confirm }))}
+                    className="absolute inset-y-0 right-2 my-auto h-8 px-2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    title={passwordVisibility.confirm ? 'Hide' : 'Show'}
+                  >
+                    {passwordVisibility.confirm ? '🙈' : '👁️'}
+                  </button>
+                </div>
                 
                 {/* Password match feedback */}
                 {passwordForm.confirmPassword && (
@@ -669,7 +787,13 @@ const SystemSettings = () => {
               <button
                 onClick={handlePasswordChange}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!passwordForm.newPassword || !passwordForm.confirmPassword || Object.keys(passwordErrors).length > 0}
+                disabled={
+                  !passwordForm.newPassword ||
+                  !passwordForm.confirmPassword ||
+                  Object.values(passwordErrors).some(Boolean) ||
+                  passwordForm.newPassword !== passwordForm.confirmPassword ||
+                  Object.keys(validatePassword(passwordForm.newPassword)).length > 0
+                }
               >
                 Change Password
               </button>

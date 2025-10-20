@@ -5,6 +5,7 @@ const ExpenseList = ({ expenses, onDelete, onEdit }) => {
   const [editForm, setEditForm] = useState({});
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -13,6 +14,7 @@ const ExpenseList = ({ expenses, onDelete, onEdit }) => {
   };
 
   const formatAmount = (amount) => {
+    if (!amount && amount !== 0) return '₹0.00';
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR'
@@ -126,11 +128,11 @@ const ExpenseList = ({ expenses, onDelete, onEdit }) => {
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
       <div className="p-6 border-b border-gray-200">
         <h2 className="text-xl font-bold text-gray-900">Recent Expenses</h2>
-        <p className="text-gray-600">Total: {expenses.length} transactions</p>
+        <p className="text-gray-600">Total: {expenses ? expenses.length : 0} transactions</p>
       </div>
 
       <div className="divide-y divide-gray-200">
-        {expenses.map((expense) => (
+        {expenses && expenses.length > 0 ? expenses.map((expense) => (
           <div key={expense.id} className="p-6 hover:bg-gray-50 transition-colors">
             {editingId === expense.id ? (
               // Edit Mode
@@ -199,15 +201,15 @@ const ExpenseList = ({ expenses, onDelete, onEdit }) => {
                     {getCategoryIcon(expense.category)}
                   </div>
                   <div>
-                    <h3 className="font-semibold text-gray-900">{expense.description}</h3>
+                    <h3 className="font-semibold text-gray-900">{expense.description || 'No description'}</h3>
                     <div className="flex items-center space-x-4 text-sm text-gray-600">
-                      <span>{expense.category}</span>
+                      <span>{expense.category || 'Uncategorized'}</span>
                       <span>•</span>
                       <span>{formatDate(expense.date)}</span>
                       <span>•</span>
                       <span className="flex items-center space-x-1">
                         <span>{getPaymentMethodIcon(expense.paymentMethod)}</span>
-                        <span>{expense.paymentMethod.replace('_', ' ')}</span>
+                        <span>{expense.paymentMethod ? expense.paymentMethod.replace('_', ' ') : 'N/A'}</span>
                       </span>
                     </div>
                   </div>
@@ -258,7 +260,11 @@ const ExpenseList = ({ expenses, onDelete, onEdit }) => {
               </div>
             )}
           </div>
-        ))}
+        )) : (
+          <div className="p-6 text-center text-gray-500">
+            <p>No expenses found. Add your first expense to get started!</p>
+          </div>
+        )}
       </div>
     </div>
   );

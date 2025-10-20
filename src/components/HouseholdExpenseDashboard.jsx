@@ -9,6 +9,7 @@ import ExpenseChangeIndicator from './ExpenseChangeIndicator';
 const HouseholdExpenseDashboard = () => {
   const { user } = useSupabaseAuth();
   const [expenses, setExpenses] = useState([]);
+  const [incomes, setIncomes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
@@ -46,10 +47,11 @@ const HouseholdExpenseDashboard = () => {
     }
   }, []);
 
-  // Load expenses from database
+  // Load expenses and incomes from database
   useEffect(() => {
     if (user?.id) {
       loadExpenses();
+      loadIncomes();
     }
   }, [user?.id]);
 
@@ -128,6 +130,37 @@ const HouseholdExpenseDashboard = () => {
     }
   };
 
+  const loadIncomes = async () => {
+    try {
+      // Compute first and last day of current month accurately
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+      const { data, error } = await supabase
+        .from('incomes')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('date', start)
+        .lte('date', end)
+        .order('date', { ascending: false });
+
+      if (error) {
+        console.error('Error loading incomes from DB:', error);
+        setIncomes([]);
+      } else {
+        const normalized = (data || []).map((i) => ({
+          ...i,
+          amount: Number(i.amount)
+        }));
+        setIncomes(normalized);
+      }
+    } catch (error) {
+      console.error('Error in loadIncomes:', error);
+      setIncomes([]);
+    }
+  };
+
   const calculateMonthlyStats = (expenseData) => {
     const stats = {
       total: 0,
@@ -137,15 +170,19 @@ const HouseholdExpenseDashboard = () => {
       other: 0
     };
 
+    const normalize = (val) => (val || '').toString().trim().toLowerCase();
+
     expenseData.forEach(expense => {
       const amt = Number(expense.amount) || 0;
       stats.total += amt;
-      
-      if (expense.subcategory === 'Utilities') {
+
+      const label = normalize(expense.category) || normalize(expense.subcategory);
+
+      if (['utilities', 'electricity', 'water', 'gas', 'internet/broadband'].includes(label)) {
         stats.utilities += amt;
-      } else if (expense.subcategory === 'Food & Groceries') {
+      } else if (['food & groceries', 'food', 'groceries'].includes(label)) {
         stats.food += amt;
-      } else if (expense.subcategory === 'Transportation') {
+      } else if (['transportation', 'transport', 'fuel/petrol', 'taxi', 'cab', 'bus', 'train'].includes(label)) {
         stats.transport += amt;
       } else {
         stats.other += amt;
@@ -182,6 +219,22 @@ const HouseholdExpenseDashboard = () => {
       'Credit Card Payment': '💳'
     };
     return icons[category] || '📝';
+  };
+
+  const getIncomeIcon = (category) => {
+    const icons = {
+      'Salary': '💼',
+      'Freelance': '💻',
+      'Business': '🏢',
+      'Investments': '📈',
+      'Rental Income': '🏠',
+      'Sales': '🛒',
+      'Bonus': '🎁',
+      'Agriculture': '🌾',
+      'Transport': '🚛',
+      'Other': '💰'
+    };
+    return icons[category] || '💰';
   };
 
   const formatDate = (dateString) => {
@@ -277,34 +330,52 @@ const HouseholdExpenseDashboard = () => {
 
           {activeTab === 'recent' && (
             <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Expenses</h3>
-              {expenses.length === 0 ? (
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activities</h3>
+              {expenses.length === 0 && incomes.length === 0 ? (
                 <div className="text-center py-8">
                   <div className="text-gray-400 text-4xl mb-4">📝</div>
-                  <p className="text-gray-600">No expenses found for this month</p>
-                  <p className="text-sm text-gray-500">Add your first expense to get started</p>
+                  <p className="text-gray-600">No activities found for this month</p>
+                  <p className="text-sm text-gray-500">Add your first income or expense to get started</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {expenses.slice(0, 10).map((expense) => (
+                  {[...expenses.map(e => ({ ...e, type: 'expense' })), ...incomes.map(i => ({ ...i, type: 'income' }))]
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                    .slice(0, 10)
+                    .map((item) => (
                     <div
-                      key={expense.id}
-                      className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                      key={`${item.type}-${item.id}`}
+                      className={`flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors ${
+                        item.type === 'income' 
+                          ? 'border-green-200 bg-green-50' 
+                          : 'border-red-200 bg-red-50'
+                      }`}
                     >
                       <div className="flex items-center space-x-3">
-                        <div className="text-2xl">{getCategoryIcon(expense.category)}</div>
+                        <div className="text-2xl">
+                          {item.type === 'income' ? getIncomeIcon(item.category) : getCategoryIcon(item.category)}
+                        </div>
                         <div>
-                          <div className="font-medium text-gray-900">{expense.category}</div>
+                          <div className="font-medium text-gray-900">{item.category}</div>
                           <div className="text-sm text-gray-600">
-                            {formatDate(expense.date)} • {expense.payment_method}
+                            {formatDate(item.date)} • {item.payment_method || 'N/A'}
                           </div>
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="font-semibold text-gray-900">₹{expense.amount.toLocaleString()}</div>
-                        {expense.is_recurring && (
+                        <div className={`font-semibold ${
+                          item.type === 'income' ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {item.type === 'income' ? '+' : '-'}₹{item.amount.toLocaleString()}
+                        </div>
+                        {item.is_recurring && (
                           <div className="text-xs text-blue-600">Recurring</div>
                         )}
+                        <div className={`text-xs ${
+                          item.type === 'income' ? 'text-green-500' : 'text-red-500'
+                        }`}>
+                          {item.type === 'income' ? 'Income' : 'Expense'}
+                        </div>
                       </div>
                     </div>
                   ))}

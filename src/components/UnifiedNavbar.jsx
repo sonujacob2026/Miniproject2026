@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { useProfile } from '../context/ProfileContext';
 import ProfileDropdown from './ProfileDropdown';
+import BalancePill from './BalancePill';
+import TransactionsSheet from './TransactionsSheet';
 
 const UnifiedNavbar = ({ 
   showBackButton = false, 
@@ -18,6 +20,7 @@ const UnifiedNavbar = ({
   const { profile } = useProfile();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showSheet, setShowSheet] = useState(false);
 
   const handleBackClick = () => {
     navigate(backButtonPath);
@@ -80,7 +83,7 @@ const UnifiedNavbar = ({
             )}
           </div>
 
-          {/* Right Side - Navigation, Auth Buttons, or Profile */}
+          {/* Right Side - Navigation, Balance, Auth Buttons, or Profile */}
           <div className="flex items-center space-x-4">
             {/* Desktop Navigation */}
             {showNavigation && !user && (
@@ -108,6 +111,11 @@ const UnifiedNavbar = ({
                   Get Started
                 </button>
               </div>
+            )}
+
+            {/* Prominent Balance pill (click to see recent transactions) */}
+            {user && (
+              <BalancePill onClick={() => setShowSheet(true)} />
             )}
 
             {/* Profile Dropdown (for authenticated users) */}
@@ -159,6 +167,7 @@ const UnifiedNavbar = ({
           </div>
         )}
       </div>
+      <TransactionsSheet open={showSheet} onClose={() => setShowSheet(false)} />
     </header>
   );
 };

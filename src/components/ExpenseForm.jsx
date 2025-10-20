@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { supabase } from '../lib/supabase';
+import supabaseService from '../services/supabaseService';
 import EnhancedReceiptUpload from './EnhancedReceiptUpload';
 import expenseCategoriesService from '../services/expenseCategoriesService';
 
@@ -20,6 +21,12 @@ const ExpenseForm = () => {
   const [loadingTransactions, setLoadingTransactions] = useState(true);
   const [categories, setCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [subcategoriesLoading, setSubcategoriesLoading] = useState(false);
+  const [showOtherCategoryInput, setShowOtherCategoryInput] = useState(false);
+  const [otherCategoryName, setOtherCategoryName] = useState('');
+  const [showOtherSubcategoryInput, setShowOtherSubcategoryInput] = useState(false);
+  const [otherSubcategoryName, setOtherSubcategoryName] = useState('');
+  const [subcategories, setSubcategories] = useState([]);
 
   // Payment methods
 
@@ -46,6 +53,8 @@ const ExpenseForm = () => {
           ...prev,
           category: categoriesData[0].category
         }));
+        // Load subcategories for the default category
+        await loadSubcategories(categoriesData[0].category);
       }
     } catch (error) {
       console.error('Error loading categories:', error);
@@ -55,16 +64,35 @@ const ExpenseForm = () => {
     }
   };
 
+  // Load subcategories for a specific category
+  const loadSubcategories = async (categoryName) => {
+    try {
+      if (!categoryName || categoryName === 'Other') {
+        setSubcategories([]);
+        setSubcategoriesLoading(false);
+        return;
+      }
+      
+      setSubcategoriesLoading(true);
+      const subcategoriesData = await expenseCategoriesService.getSubcategories(categoryName);
+      setSubcategories(subcategoriesData);
+    } catch (error) {
+      console.error('Error loading subcategories:', error);
+      setSubcategories([]);
+    } finally {
+      setSubcategoriesLoading(false);
+    }
+  };
+
   // Load transactions from Supabase
   const loadTransactions = async () => {
     try {
       setLoadingTransactions(true);
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
+      const { data, error } = await supabaseService.select('transactions', {
+        eq: { user_id: user.id },
+        order: { column: 'created_at', ascending: false },
+        limit: 10
+      });
 
       if (error) {
         console.error('Error loading transactions:', error);
@@ -88,8 +116,95 @@ const ExpenseForm = () => {
     }));
   };
 
+  // Handle category change
+  const handleCategoryChange = async (category) => {
+    if (category === 'Other') {
+      setShowOtherCategoryInput(true);
+      setFormData(prev => ({
+        ...prev,
+        category: 'Other',
+        subcategory: ''
+      }));
+      setSubcategories([]);
+      setShowOtherSubcategoryInput(false);
+    } else {
+      setShowOtherCategoryInput(false);
+      setOtherCategoryName('');
+      setFormData(prev => ({
+        ...prev,
+        category: category,
+        subcategory: ''
+      }));
+      await loadSubcategories(category);
+    }
+  };
+
+  // Handle subcategory change
+  const handleSubcategoryChange = (subcategory) => {
+    if (subcategory === 'Other') {
+      setShowOtherSubcategoryInput(true);
+      setFormData(prev => ({
+        ...prev,
+        subcategory: 'Other'
+      }));
+    } else {
+      setShowOtherSubcategoryInput(false);
+      setOtherSubcategoryName('');
+      setFormData(prev => ({
+        ...prev,
+        subcategory: subcategory
+      }));
+    }
+  };
+
+  // Save custom category to database
+  const saveCustomCategory = async (categoryName) => {
+    try {
+      const categoryData = {
+        category: categoryName,
+        icon: '📝',
+        subcategories: [],
+        is_active: true
+      };
+      
+      const newCategory = await expenseCategoriesService.addCategory(categoryData);
+      setCategories(prev => [...prev, newCategory]);
+      return newCategory;
+    } catch (error) {
+      console.error('Error saving custom category:', error);
+      throw error;
+    }
+  };
+
+  // Save custom subcategory to database
+  const saveCustomSubcategory = async (categoryId, subcategoryName) => {
+    try {
+      const subcategoryData = {
+        name: subcategoryName,
+        icon: '📝',
+        isRecurring: false,
+        frequency: 'monthly'
+      };
+      
+      const updatedCategory = await expenseCategoriesService.addSubcategory(categoryId, subcategoryData);
+      
+      // Update the categories list with the new subcategory
+      setCategories(prev => prev.map(cat => 
+        cat.id === categoryId ? updatedCategory : cat
+      ));
+      
+      // Reload subcategories for current category
+      await loadSubcategories(formData.category);
+      
+      return updatedCategory;
+    } catch (error) {
+      console.error('Error saving custom subcategory:', error);
+      throw error;
+    }
+  };
+
   // Handle data extracted from receipt OCR
-  const handleReceiptDataExtracted = (extractedData) => {
+  const handleReceiptDataExtracted = async (extractedData) => {
     console.log('🔍 ExpenseForm: Received extracted data:', extractedData);
     
     const updates = {};
@@ -112,25 +227,31 @@ const ExpenseForm = () => {
       
       // Create a mapping for common AI-extracted categories to database categories
       const categoryMapping = {
-        'food': 'Food & Dining',
-        'food & dining': 'Food & Dining',
-        'dining': 'Food & Dining',
-        'restaurant': 'Food & Dining',
-        'cafe': 'Food & Dining',
-        'transportation': 'Transportation',
-        'transport': 'Transportation',
+        // Map to DB-facing names used in this app
+        'food': 'Food',
+        'food & dining': 'Food',
+        'dining': 'Food',
+        'restaurant': 'Food',
+        'restaurent': 'Food',
+        'takeaway': 'Food',
+        'take way': 'Food',
+        'takeway': 'Food',
+        'cafe': 'Food',
+        'transportation': 'Transport',
+        'transport': 'Transport',
+        'public transport': 'Transport',
         'shopping': 'Shopping',
-        'bills & utilities': 'Utilities',
-        'bills': 'Utilities',
-        'utilities': 'Utilities',
+        'bills & utilities': 'Bills',
+        'bills': 'Bills',
+        'utilities': 'Bills',
         'healthcare': 'Healthcare',
         'health': 'Healthcare',
         'entertainment': 'Entertainment',
         'education': 'Education',
-        'housing': 'Housing',
+        'housing': 'Rent',
         'miscellaneous': 'Miscellaneous',
         'misc': 'Miscellaneous',
-        'financial': 'Financial'
+        'financial': 'Investments'
       };
       
       // First try exact mapping
@@ -158,6 +279,26 @@ const ExpenseForm = () => {
           console.log('⚠️ Category not found in available categories:', extractedData.category);
           console.log('📋 Available categories:', categories.map(c => c.category));
         }
+      }
+    }
+
+    // Apply the category update immediately so subcategories can load
+    const nextCategory = updates.category || formData.category;
+    if (updates.category) {
+      setFormData(prev => ({ ...prev, category: updates.category }));
+      // Ensure subcategories for this category are loaded before selecting subcategory
+      await loadSubcategories(updates.category);
+    }
+
+    // Subcategory extraction (after ensuring subcategories are loaded)
+    if (extractedData.subcategory && nextCategory) {
+      const subLower = extractedData.subcategory.toLowerCase();
+      const exact = subcategories.find(s => s.name.toLowerCase() === subLower);
+      if (exact) {
+        updates.subcategory = exact.name;
+      } else {
+        const contains = subcategories.find(s => s.name.toLowerCase().includes(subLower) || subLower.includes(s.name.toLowerCase()));
+        if (contains) updates.subcategory = contains.name;
       }
     }
     
@@ -207,44 +348,96 @@ const ExpenseForm = () => {
       return;
     }
 
+    // Validate custom category input
+    if (formData.category === 'Other' && (!otherCategoryName || otherCategoryName.trim() === '')) {
+      setMessage('Please enter a custom category name');
+      return;
+    }
+
+    // Validate custom subcategory input
+    if (formData.subcategory === 'Other' && (!otherSubcategoryName || otherSubcategoryName.trim() === '')) {
+      setMessage('Please enter a custom subcategory name');
+      return;
+    }
+
     setLoading(true);
     setMessage('');
 
     try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .insert([
-          {
-            user_id: user.id,
-            amount: parseFloat(formData.amount),
-            category: formData.category,
-            payment_method: formData.paymentMethod,
-            date: formData.date,
-            description: formData.description || null,
-            receipt_url: formData.receiptUrl || null
+      let finalCategory = formData.category;
+      let finalSubcategory = formData.subcategory;
+
+      // Handle custom category
+      if (formData.category === 'Other') {
+        try {
+          const newCategory = await saveCustomCategory(otherCategoryName.trim());
+          finalCategory = newCategory.category;
+          setMessage('Custom category created and transaction added successfully!');
+        } catch (error) {
+          setMessage('Error creating custom category. Please try again.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Handle custom subcategory
+      if (formData.subcategory === 'Other') {
+        try {
+          const selectedCategory = categories.find(cat => cat.category === finalCategory);
+          if (selectedCategory) {
+            await saveCustomSubcategory(selectedCategory.id, otherSubcategoryName.trim());
+            finalSubcategory = otherSubcategoryName.trim();
           }
-        ])
-        .select();
+        } catch (error) {
+          setMessage('Error creating custom subcategory. Please try again.');
+          setLoading(false);
+          return;
+        }
+      }
+
+      const { data, error } = await supabaseService.insert('transactions', [
+        {
+          user_id: user.id,
+          amount: parseFloat(formData.amount),
+          category: finalCategory,
+          subcategory: finalSubcategory || null,
+          payment_method: formData.paymentMethod,
+          date: formData.date,
+          description: formData.description || null,
+          receipt_url: formData.receiptUrl || null
+        }
+      ]);
 
       if (error) {
         console.error('Error adding transaction:', error);
         setMessage('Error adding transaction. Please try again.');
       } else {
         console.log('Transaction added successfully:', data);
-        setMessage('Transaction added successfully!');
+        if (!message.includes('Custom category created')) {
+          setMessage('Transaction added successfully!');
+        }
         
         // Reset form
         setFormData({
           amount: '',
-          category: 'Food',
+          category: categories.length > 0 ? categories[0].category : '',
+          subcategory: '',
           paymentMethod: 'UPI',
           date: new Date().toISOString().split('T')[0],
           description: '',
           receiptUrl: ''
         });
 
-        // Reload transactions
+        // Reset other inputs
+        setShowOtherCategoryInput(false);
+        setOtherCategoryName('');
+        setShowOtherSubcategoryInput(false);
+        setOtherSubcategoryName('');
+        setSubcategories([]);
+
+        // Reload transactions and categories
         await loadTransactions();
+        await loadCategories();
       }
     } catch (error) {
       console.error('Exception adding transaction:', error);
@@ -269,11 +462,9 @@ const ExpenseForm = () => {
     if (!res.isConfirmed) return;
 
     try {
-      const { error } = await supabase
-        .from('transactions')
-        .delete()
-        .eq('id', transactionId)
-        .eq('user_id', user.id);
+      const { error } = await supabaseService.delete('transactions', {
+        eq: { id: transactionId, user_id: user.id }
+      });
 
       if (error) {
         console.error('Error deleting transaction:', error);
@@ -419,7 +610,7 @@ const ExpenseForm = () => {
               ) : (
                 <select
                   value={formData.category}
-                  onChange={(e) => handleInputChange('category', e.target.value)}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                   required
                 >
@@ -429,7 +620,81 @@ const ExpenseForm = () => {
                       {category.icon} {category.category}
                     </option>
                   ))}
+                  <option value="Other">➕ Other</option>
                 </select>
+              )}
+              
+              {/* Custom Category Input */}
+              {showOtherCategoryInput && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter Custom Category Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={otherCategoryName}
+                    onChange={(e) => setOtherCategoryName(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    placeholder="Enter your custom category name"
+                    required
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Subcategory */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Subcategory
+              </label>
+              {subcategoriesLoading ? (
+                <div className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 flex items-center justify-center">
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-teal-500 rounded-full animate-spin mr-2"></div>
+                  <span className="text-gray-500">Loading subcategories...</span>
+                </div>
+              ) : (
+                <select
+                  value={formData.subcategory}
+                  onChange={(e) => handleSubcategoryChange(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  disabled={!formData.category || formData.category === 'Other'}
+                >
+                  <option value="">
+                    {!formData.category 
+                      ? 'Select a category first' 
+                      : formData.category === 'Other'
+                        ? 'Custom category - no subcategories'
+                        : subcategories.length === 0 
+                          ? 'No subcategories available' 
+                          : 'Select subcategory'
+                    }
+                  </option>
+                  {subcategories.map((subcategory) => (
+                    <option key={subcategory.name} value={subcategory.name}>
+                      {subcategory.icon} {subcategory.name}
+                    </option>
+                  ))}
+                  {formData.category && formData.category !== 'Other' && subcategories.length > 0 && (
+                    <option value="Other">➕ Other</option>
+                  )}
+                </select>
+              )}
+              
+              {/* Custom Subcategory Input */}
+              {showOtherSubcategoryInput && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter Custom Subcategory Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={otherSubcategoryName}
+                    onChange={(e) => setOtherSubcategoryName(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                    placeholder="Enter your custom subcategory name"
+                    required
+                  />
+                </div>
               )}
             </div>
 

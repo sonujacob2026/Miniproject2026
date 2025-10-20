@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase, auth } from '../lib/supabase';
+import { supabase, auth, sessionManager } from '../lib/supabase';
 
 const SupabaseAuthContext = createContext({});
 
@@ -16,139 +16,80 @@ export const SupabaseAuthProvider = ({ children }) => {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Clean, reliable session bootstrap + live updates
   useEffect(() => {
-    // Try to load cached session first for instant loading
-    const cachedSession = localStorage.getItem('supabase_session');
-    let hasCachedSession = false;
-    
-    if (cachedSession) {
-      try {
-        const parsed = JSON.parse(cachedSession);
-        if (parsed && parsed.expires_at && new Date(parsed.expires_at) > new Date()) {
-          setSession(parsed);
-          setUser(parsed.user);
-          hasCachedSession = true;
-          setLoading(false);
-          console.log('SupabaseAuth: Loaded cached session, showing immediately');
-        }
-      } catch (error) {
-        console.error('Error parsing cached session:', error);
-        localStorage.removeItem('supabase_session');
-      }
-    }
+    let isMounted = true;
+    const safety = setTimeout(() => {
+      if (!isMounted) return;
+      console.log('SupabaseAuth: Safety timeout reached, setting loading to false');
+      setLoading(false);
+    }, 10000);
 
-    // Get fresh session
-    const getInitialSession = async () => {
+    const init = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
+        const { data, error } = await supabase.auth.getSession();
+        if (!isMounted) return;
         if (error) {
-          console.error('Error getting session:', error);
-        } else {
-          // Update session and user
-          setSession(session);
-          setUser(session?.user ?? null);
-          
-          // Cache the session for next time
-          if (session) {
-            localStorage.setItem('supabase_session', JSON.stringify(session));
-          } else {
-            localStorage.removeItem('supabase_session');
-          }
+          console.warn('SupabaseAuth: getSession error:', error);
         }
-      } catch (error) {
-        console.error('Error in getInitialSession:', error);
+        setSession(data?.session ?? null);
+        setUser(data?.session?.user ?? null);
+      } catch (e) {
+        if (!isMounted) return;
+        console.warn('SupabaseAuth: getSession exception:', e);
       } finally {
-        if (!hasCachedSession) {
-          setLoading(false);
-        }
+        if (!isMounted) return;
+        setLoading(false);
       }
     };
 
-    // Safety timeout set to 30s to allow Google OAuth redirects to complete
-    const safety = setTimeout(() => {
-      console.log('SupabaseAuth: Safety timeout reached, setting loading to false');
+    init();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!isMounted) return;
+      setSession(nextSession ?? null);
+      setUser(nextSession?.user ?? null);
       setLoading(false);
-    }, 30000);
+      if (event === 'SIGNED_OUT') {
+        // Optional redirect can be handled by consumer using user === null
+      }
+    });
 
-    getInitialSession().finally(() => clearTimeout(safety));
+    return () => {
+      isMounted = false;
+      clearTimeout(safety);
+      listener.subscription?.unsubscribe?.();
+    };
+  }, []);
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Auth state changed:', event);
-        // no-op for INITIAL_SESSION in original behavior
+  // Monitor session health and prevent timeouts
+  useEffect(() => {
+    if (!user || !session) return;
+
+    // Set up periodic session health check
+    const sessionHealthCheck = setInterval(async () => {
+      try {
+        const sessionCheck = await sessionManager.ensureValidSession();
         
-        // Handle OAuth callback events more smoothly
-        if (event === 'SIGNED_IN' && session?.user) {
-          console.log('✅ OAuth sign-in successful:', session.user.email);
+        if (!sessionCheck.valid) {
+          console.warn('Session health check failed:', sessionCheck.error);
           
-          // Skip processing if this is an admin user (handled by admin system)
-          if (session.user.email === 'admin@gmail.com') {
-            console.log('Admin user detected in Supabase auth, ignoring...');
-            // Don't set user state for admin - let admin context handle it
-            return;
-          }
+          // Try to refresh the session
+          const refreshed = await sessionManager.handleSessionTimeout();
           
-          // Check if admin mode is active - if so, don't process regular user sign-ins
-          const adminMode = localStorage.getItem('admin_mode') === 'true';
-          if (adminMode) {
-            console.log('Admin mode active, ignoring regular user sign-in');
-            return;
-          }
-          
-          // (Removed deprecated status check: column does not exist in user_profiles)
-          
-          // Set user immediately for faster loading
-          setSession(session);
-          setUser(session.user);
-          setLoading(false);
-          
-          // Cache the session
-          localStorage.setItem('supabase_session', JSON.stringify(session));
-
-          // Ensure a user_profiles row exists and is linked to this user_id
-          try {
-            const now = new Date().toISOString();
-            const { error: upsertErr } = await supabase
-              .from('user_profiles')
-              .upsert(
-                {
-                  user_id: session.user.id,
-                  email: session.user.email,
-                  last_login_at: now,
-                  updated_at: now
-                },
-                { onConflict: 'user_id' }
-              );
-            if (upsertErr) {
-              console.warn('user_profiles upsert on SIGNED_IN warning:', upsertErr);
-            }
-          } catch (e) {
-            console.warn('user_profiles upsert on SIGNED_IN exception:', e);
-          }
-        } else if (event === 'SIGNED_OUT') {
-          console.log('User signed out, clearing state');
-          setSession(null);
-          setUser(null);
-          setLoading(false);
-        } else {
-          setSession(session);
-          setUser(session?.user ?? null);
-          setLoading(false);
-          
-          // Cache or clear session
-          if (session) {
-            localStorage.setItem('supabase_session', JSON.stringify(session));
-          } else {
-            localStorage.removeItem('supabase_session');
+          if (!refreshed) {
+            console.error('Session refresh failed, user will need to sign in again');
+            // Don't immediately sign out - let the user continue working
+            // The next API call will handle the session timeout gracefully
           }
         }
+      } catch (error) {
+        console.error('Session health check error:', error);
       }
-    );
+    }, 5 * 60 * 1000); // Check every 5 minutes
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => clearInterval(sessionHealthCheck);
+  }, [user, session]);
 
   // Sign up with email and password
   const signUp = async (email, password, fullName) => {

@@ -13,7 +13,7 @@ export const useProfile = () => {
 };
 
 export const ProfileProvider = ({ children }) => {
-  const { user } = useSupabaseAuth();
+  const { user, loading: authLoading } = useSupabaseAuth();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -22,8 +22,16 @@ export const ProfileProvider = ({ children }) => {
 
   // Load profile when user changes - use cached data first, then fetch fresh
   useEffect(() => {
+    let isMounted = true;
+    
     const loadProfile = async () => {
+      // Wait for auth to resolve first
+      if (authLoading) {
+        return;
+      }
+
       if (user?.id) {
+        setLoading(true);
         // Check if this is an admin user (only if admin mode is explicitly active)
         const isAdminMode = localStorage.getItem('admin_mode') === 'true';
         const isAdminUser = user.email === 'admin@gmail.com';
@@ -103,12 +111,14 @@ export const ProfileProvider = ({ children }) => {
               
               console.log('ProfileContext: Profile loaded and validated successfully');
             } else {
-              console.error('ProfileContext: Profile data is incomplete, missing required fields');
-              if (!hasCachedProfile) {
-                setProfile(null);
-                setOnboardingCompleted(false);
-              }
+              console.warn('ProfileContext: Profile data missing some required fields, using auto-healed data');
+              setProfile(result.data);
+              setOnboardingCompleted(result.data?.onboarding_completed || false);
             }
+          } else if (result.data) {
+            console.warn('ProfileContext: Profile service returned fallback data despite error:', result.error);
+            setProfile(result.data);
+            setOnboardingCompleted(result.data?.onboarding_completed || false);
           } else {
             console.error('ProfileContext: Failed to load profile:', result.error);
             if (!hasCachedProfile) {
@@ -123,19 +133,37 @@ export const ProfileProvider = ({ children }) => {
             setOnboardingCompleted(false);
           }
         } finally {
-          setLoading(false);
-          setRefreshing(false);
+          if (isMounted) {
+            setLoading(false);
+            setRefreshing(false);
+          }
         }
       } else {
         // console.log('ProfileContext: No user ID, clearing profile');
-        setProfile(null);
-        setOnboardingCompleted(false);
-        setLoading(false);
+        if (isMounted) {
+          setProfile(null);
+          setOnboardingCompleted(false);
+          setLoading(false);
+        }
       }
     };
 
     loadProfile();
-  }, [user?.id]);
+    
+    // Safety timeout to prevent infinite loading
+    const safetyTimeout = setTimeout(() => {
+      if (isMounted) {
+        console.log('ProfileContext: Safety timeout reached, setting loading to false');
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }, 15000); // 15 seconds timeout
+    
+    return () => {
+      isMounted = false;
+      clearTimeout(safetyTimeout);
+    };
+  }, [user?.id, authLoading]);
 
   // Save profile data
   const saveProfile = async (profileData) => {

@@ -30,6 +30,7 @@ import AdminDebug from './components/AdminDebug'
 import ExpenseCategoriesAdmin from './components/ExpenseCategoriesAdmin'
 import SystemSettings from './components/SystemSettings'
 import UserStatusChecker from './components/UserStatusChecker'
+import LoadingDebugger from './components/LoadingDebugger'
 
 const AppRoutes = () => {
   const { user, loading } = useSupabaseAuth();
@@ -37,7 +38,12 @@ const AppRoutes = () => {
   console.log('AppRoutes: user:', user?.id, 'loading:', loading);
 
   if (loading) {
-    return <SmoothLoader message="Loading your dashboard..." delay={100} />
+    return (
+      <>
+        <SmoothLoader message="Loading your dashboard..." delay={100} />
+        <LoadingDebugger />
+      </>
+    )
   }
 
   return (

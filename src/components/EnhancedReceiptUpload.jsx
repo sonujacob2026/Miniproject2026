@@ -190,35 +190,38 @@ const EnhancedReceiptUpload = ({ onDataExtracted, onReceiptUploaded, onClear, on
       setUploadProgress(75);
       setProcessingStep('Analyzing with AI...');
       
-      // Analyze with OpenAI AI
+      // Analyze with AI, but prepare deterministic fallback first
       console.log('🤖 Starting AI analysis...');
       setIsAnalyzing(true);
-      const aiResult = await analyzeWithAI(ocrResult.text);
-      
-      console.log('🧠 AI analysis result:', aiResult);
-      
+      const deterministic = classifyExpenseText(ocrResult.text);
+      let aiResult = null;
+      try {
+        aiResult = await analyzeWithAI(ocrResult.text);
+        console.log('🧠 AI analysis result:', aiResult);
+      } catch (e) {
+        console.warn('AI analysis failed, will use deterministic classification:', e);
+      }
+
       setUploadProgress(100);
       setProcessingStep('Analysis complete!');
-      
+
       // Call callbacks
       console.log('📞 Calling callbacks...');
-      
+
       if (onReceiptUploaded) {
         console.log('📤 Calling onReceiptUploaded with URL:', publicUrl);
         onReceiptUploaded(publicUrl);
       }
-      
-      if (onDataExtracted && aiResult.success) {
-        console.log('✅ Calling onDataExtracted with AI data:', aiResult.data);
-        onDataExtracted(aiResult.data);
-      } else if (onDataExtracted) {
-        // Fallback to basic OCR parsing if AI fails
-        console.log('⚠️ AI failed, using basic parsing fallback');
-        const basicData = parseReceiptTextBasic(ocrResult.text);
-        console.log('📝 Basic parsed data:', basicData);
-        onDataExtracted(basicData);
-      } else {
-        console.log('❌ No onDataExtracted callback provided');
+
+      const payload = (aiResult && aiResult.success && aiResult.data)
+        ? aiResult.data
+        : { category: deterministic.category, subcategory: deterministic.subcategory, confidence: deterministic.confidence };
+      // Include raw OCR text so caller can extract domain-specific fields (e.g., crop, yield)
+      payload.rawText = ocrResult.text;
+
+      if (onDataExtracted) {
+        console.log('✅ Emitting extracted data:', payload);
+        onDataExtracted(payload);
       }
       
       } catch (err) {
@@ -598,6 +601,61 @@ const EnhancedReceiptUpload = ({ onDataExtracted, onReceiptUploaded, onClear, on
     console.log('✅ Basic OCR parsing complete:', parsedData);
     return parsedData;
   };
+
+  // Deterministic keyword-based classifier for categories/subcategories
+  function classifyExpenseText(ocrText) {
+    const text = (ocrText || '').toLowerCase();
+    const hasAny = (arr) => arr.some(k => text.includes(k));
+    const score = {};
+    const add = (key, pts = 1) => { score[key] = (score[key] || 0) + pts; };
+
+    // Transport → Public Transport
+    if (hasAny([
+      'ksrtc', 'srtc', 'kerala srtc', 'my bus', 'mybus', 'bus ticket', 'metro', 'train', 'irctc', 'ticket no', 'super fast'
+    ])) {
+      add('Transport|Public Transport', 4);
+    }
+
+    // Transport → Fuel
+    if (hasAny(['petrol', 'diesel', 'fuel', 'bharat petroleum', 'indian oil', 'hpcl', 'bpcl'])) {
+      add('Transport|Fuel', 3);
+    }
+
+    // Transport → Private
+    if (hasAny(['uber', 'ola', 'rapido', 'taxi', 'cab', 'ride'])) {
+      add('Transport|Private Transport', 3);
+    }
+
+    // Food & Dining → Restaurant / Cafe / Grocery
+    if (hasAny(['restaurant', 'restaurent', 'dine', 'dining', 'hotel', 'biryani', 'meals', 'takeaway', 'take away', 'takeway'])) {
+      add('Food & Dining|Restaurant', 3);
+    }
+    if (hasAny(['cafe', 'coffee', 'tea', 'chai', 'juice', 'beverage'])) {
+      add('Food & Dining|Cafe / Beverages', 3);
+    }
+    if (hasAny(['grocery', 'supermarket', 'provision', 'dmart', 'reliance fresh', 'big bazaar', 'vegetable', 'fruit'])) {
+      add('Food & Dining|Grocery', 3);
+    }
+
+    // Shopping
+    if (hasAny(['shirt', 'jeans', 'saree', 'apparel', 'boutique'])) add('Shopping|Clothing', 2);
+    if (hasAny(['mobile', 'laptop', 'electronics', 'charger', 'earbuds', 'tv'])) add('Shopping|Electronics', 2);
+
+    // Utilities
+    if (hasAny(['electricity', 'kseb', 'consumer no', 'unit charge'])) add('Utilities|Electricity', 3);
+    if (hasAny(['water bill', 'water charges'])) add('Utilities|Water', 3);
+    if (hasAny(['recharge', 'prepaid', 'postpaid', 'broadband', 'fiber', 'wifi', 'airtel', 'jio', 'vi'])) add('Utilities|Mobile / Internet', 3);
+
+    // Healthcare
+    if (hasAny(['pharmacy', 'chemist', 'medicine', 'tablet', 'capsule'])) add('Healthcare|Medicines', 3);
+    if (hasAny(['clinic', 'hospital', 'consultation', 'doctor fee'])) add('Healthcare|Consultation', 3);
+
+    const best = Object.entries(score).sort((a, b) => b[1] - a[1])[0];
+    if (!best) return { category: 'Others', subcategory: 'Miscellaneous / Uncategorized', confidence: '0.50' };
+    const [category, subcategory] = best[0].split('|');
+    const conf = Math.min(0.99, 0.6 + best[1] * 0.1);
+    return { category, subcategory, confidence: conf.toFixed(2) };
+  }
 
   // Handle drag and drop
   const handleDragOver = useCallback((e) => {

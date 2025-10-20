@@ -77,19 +77,25 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
 
   const handlePasswordChange = async (value) => {
     setPassword(value);
-    
-    if (value.length > 0) {
-      try {
-        const result = await validatePassword(value);
-        setPasswordStrength(result.data);
-        setValidationErrors(prev => ({
-          ...prev,
-          password: result.data?.isValid ? null : 'Password does not meet requirements'
-        }));
-      } catch (error) {
-        console.log('Password validation error:', error);
+
+    if (isSignUp) {
+      if (value.length > 0) {
+        try {
+          const result = await validatePassword(value);
+          setPasswordStrength(result.data);
+          setValidationErrors(prev => ({
+            ...prev,
+            password: result.data?.isValid ? null : 'Password does not meet requirements'
+          }));
+        } catch (error) {
+          console.log('Password validation error:', error);
+        }
+      } else {
+        setPasswordStrength(null);
+        setValidationErrors(prev => ({ ...prev, password: null }));
       }
     } else {
+      // For sign-in, no password validation needed
       setPasswordStrength(null);
       setValidationErrors(prev => ({ ...prev, password: null }));
     }
@@ -573,7 +579,7 @@ const AuthPage = ({ suppressAutoRedirect = false, initialMode } = {}) => {
                 }`}
                 placeholder="Enter your password"
               />
-              {validationErrors.password && (
+              {isSignUp && validationErrors.password && (
                 <p className="mt-1 text-sm text-red-600">{validationErrors.password}</p>
               )}
               {isSignUp && passwordStrength && (

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { useProfile } from '../context/ProfileContext';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 import ExpenseList from './ExpenseList';
 import ExpenseStats from './ExpenseStats';
 import FinancialInsights from './FinancialInsights';
@@ -13,6 +14,7 @@ import UnifiedNavbar from './UnifiedNavbar';
 import SmoothLoader from './SmoothLoader';
 import ProfileSkeleton from './ProfileSkeleton';
 import DataValidationAlert from './DataValidationAlert';
+import LoadingDebugger from './LoadingDebugger';
 
 import HouseholdExpenseDashboard from './HouseholdExpenseDashboard';
 import BudgetOverview from './BudgetOverview';
@@ -27,6 +29,8 @@ const Dashboard = () => {
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showAddIncome, setShowAddIncome] = useState(false);
   const [expenses, setExpenses] = useState([]);
+  const [incomes, setIncomes] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('expenses');
   const [showBudget, setShowBudget] = useState(false);
   const [showGoals, setShowGoals] = useState(false);
@@ -56,9 +60,12 @@ const Dashboard = () => {
   }, [profile, profileLoading]);
 
   useEffect(() => {
-    loadExpenses();
+    if (user?.id) {
+      loadExpenses();
+      loadIncomes();
+    }
     // Profile is automatically loaded by ProfileContext
-  }, []);
+  }, [user?.id]);
 
   // Refresh profile only if not already loaded to avoid flicker
   useEffect(() => {
@@ -89,14 +96,66 @@ const Dashboard = () => {
     }
   }, [user?.id, profileLoading, onboardingIncomplete, navigate]);
 
-  const loadExpenses = () => {
+  const loadExpenses = async () => {
+    if (!user?.id) return;
+    
     try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('date', { ascending: false });
+
+      if (error) {
+        console.error('Error loading expenses from database:', error);
+        // Fallback to localStorage
+        const savedExpenses = localStorage.getItem('expenseai_expenses');
+        if (savedExpenses) {
+          setExpenses(JSON.parse(savedExpenses));
+        }
+      } else {
+        setExpenses(data || []);
+      }
+    } catch (error) {
+      console.error('Error loading expenses:', error);
+      // Fallback to localStorage
       const savedExpenses = localStorage.getItem('expenseai_expenses');
       if (savedExpenses) {
         setExpenses(JSON.parse(savedExpenses));
       }
+    }
+  };
+
+  const loadIncomes = async () => {
+    if (!user?.id) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('incomes')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('date', { ascending: false });
+
+      if (error) {
+        console.error('Error loading incomes from database:', error);
+        // Fallback to localStorage
+        const savedIncomes = localStorage.getItem('expenseai_incomes');
+        if (savedIncomes) {
+          setIncomes(JSON.parse(savedIncomes));
+        }
+      } else {
+        setIncomes(data || []);
+      }
     } catch (error) {
-      console.error('Error loading expenses:', error);
+      console.error('Error loading incomes:', error);
+      // Fallback to localStorage
+      const savedIncomes = localStorage.getItem('expenseai_incomes');
+      if (savedIncomes) {
+        setIncomes(JSON.parse(savedIncomes));
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -104,6 +163,11 @@ const Dashboard = () => {
   useEffect(() => {
     localStorage.setItem('expenseai_expenses', JSON.stringify(expenses));
   }, [expenses]);
+
+  // Save incomes to localStorage whenever incomes change
+  useEffect(() => {
+    localStorage.setItem('expenseai_incomes', JSON.stringify(incomes));
+  }, [incomes]);
 
   // Disable background scroll (html + body) when modals are open
   useEffect(() => {
@@ -143,11 +207,20 @@ const Dashboard = () => {
     };
     setExpenses(prev => [expense, ...prev]);
     setShowAddExpense(false);
+    // Refresh data from database
+    refreshData();
+  };
+
+  const refreshData = async () => {
+    await loadExpenses();
+    await loadIncomes();
   };
 
   const deleteExpense = (expenseId) => {
     if (window.confirm('Are you sure you want to delete this expense?')) {
       setExpenses(prev => prev.filter(expense => expense.id !== expenseId));
+      // Refresh data from database
+      refreshData();
     }
   };
 
@@ -159,6 +232,8 @@ const Dashboard = () => {
           : expense
       )
     );
+    // Refresh data from database
+    refreshData();
   };
 
   const handleSignOut = async () => {
@@ -190,6 +265,7 @@ const Dashboard = () => {
             { !user ? 'Redirecting to sign in...' : 'Loading your dashboard...' }
           </p>
         </div>
+        <LoadingDebugger />
       </div>
     );
   }
@@ -382,14 +458,53 @@ const Dashboard = () => {
 
 
         {/* Expense Statistics */}
-        <ExpenseStats expenses={expenses} />
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg p-6 shadow-sm border border-gray-200 animate-pulse">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
+                  <div className="ml-4 flex-1">
+                    <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
+                    <div className="h-6 bg-gray-200 rounded w-16 mb-1"></div>
+                    <div className="h-3 bg-gray-200 rounded w-24"></div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <ExpenseStats expenses={expenses} incomes={incomes} />
+        )}
 
         {/* Expense List */}
-        <ExpenseList
-          expenses={expenses}
-          onDelete={deleteExpense}
-          onEdit={editExpense}
-        />
+        {loading ? (
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+            <div className="animate-pulse">
+              <div className="h-6 bg-gray-200 rounded w-32 mb-4"></div>
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-gray-200 rounded"></div>
+                      <div>
+                        <div className="h-4 bg-gray-200 rounded w-24 mb-1"></div>
+                        <div className="h-3 bg-gray-200 rounded w-16"></div>
+                      </div>
+                    </div>
+                    <div className="h-4 bg-gray-200 rounded w-16"></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <ExpenseList
+            expenses={expenses}
+            onDelete={deleteExpense}
+            onEdit={editExpense}
+          />
+        )}
 
       </main>
 

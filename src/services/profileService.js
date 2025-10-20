@@ -100,26 +100,107 @@ const ProfileService = {
         return { success: false, error: error.message };
       }
 
-      const row = data || null;
-      
-      // Validate data completeness
-      if (row) {
-        const requiredFields = ['user_id', 'full_name', 'email'];
-        const missingFields = requiredFields.filter(field => 
-          !row[field] || row[field] === '' || row[field] === null
+      let row = data || null;
+      let cachedAuthUser = null;
+
+      const loadAuthUser = async () => {
+        if (cachedAuthUser) {
+          return cachedAuthUser;
+        }
+        try {
+          const { data: authData, error: authError } = await supabase.auth.getUser();
+          if (authError) {
+            console.warn('ProfileService: Unable to fetch auth user for profile repair:', authError);
+            return null;
+          }
+          cachedAuthUser = authData?.user ?? null;
+          return cachedAuthUser;
+        } catch (authErr) {
+          console.warn('ProfileService: Exception fetching auth user for profile repair:', authErr);
+          return null;
+        }
+      };
+
+      const buildFallbackName = (authUser) => {
+        if (!authUser) return 'New User';
+        return (
+          authUser.user_metadata?.full_name ||
+          authUser.user_metadata?.name ||
+          (authUser.email ? authUser.email.split('@')[0] : null) ||
+          'New User'
         );
-        
-        if (missingFields.length > 0) {
-          console.warn('ProfileService: Profile data is incomplete, missing fields:', missingFields);
-          return { 
-            success: false, 
-            error: `Profile data is incomplete. Missing: ${missingFields.join(', ')}`,
-            data: row // Return partial data for debugging
-          };
+      };
+
+      if (!row) {
+        const authUser = await loadAuthUser();
+
+        if (!authUser) {
+          console.warn('ProfileService: Profile missing and no auth user available to backfill');
+          return { success: false, error: 'Profile not found and unable to create default profile' };
+        }
+
+        const fallbackName = buildFallbackName(authUser);
+        const now = new Date().toISOString();
+
+        const { data: inserted, error: insertErr } = await supabase
+          .from(table)
+          .upsert(
+            {
+              user_id: authUser.id,
+              email: authUser.email,
+              full_name: fallbackName,
+              onboarding_completed: false,
+              created_at: now,
+              updated_at: now
+            },
+            { onConflict: 'user_id' }
+          )
+          .select()
+          .maybeSingle();
+
+        if (insertErr) {
+          console.error('ProfileService: Failed to create default profile row:', insertErr);
+          return { success: false, error: insertErr.message };
+        }
+
+        row = inserted;
+      }
+
+      const authUser = await loadAuthUser();
+      const updates = {};
+
+      if ((!row.email || row.email === '') && authUser?.email) {
+        updates.email = authUser.email;
+      }
+
+      if (!row.full_name || row.full_name === '') {
+        updates.full_name = buildFallbackName(authUser);
+      }
+
+      if (Object.keys(updates).length > 0) {
+        updates.updated_at = new Date().toISOString();
+        const { data: healedRow, error: healErr } = await supabase
+          .from(table)
+          .update(updates)
+          .eq('user_id', userId)
+          .select()
+          .maybeSingle();
+
+        if (healErr) {
+          console.warn('ProfileService: Unable to update missing profile fields:', healErr);
+          row = { ...row, ...updates };
+        } else if (healedRow) {
+          row = healedRow;
+        } else {
+          row = { ...row, ...updates };
         }
       }
 
-      console.log('ProfileService: Profile fetched and validated successfully from database');
+      // Normalise optional JSON columns to prevent null/undefined issues downstream
+      row.primary_expenses = Array.isArray(row.primary_expenses) ? row.primary_expenses : [];
+      row.financial_goals = Array.isArray(row.financial_goals) ? row.financial_goals : [];
+
+      console.log('ProfileService: Profile fetched and auto-healed successfully from database');
       return { success: true, data: row };
     } catch (err) {
       console.error('ProfileService: Exception getting profile:', err);

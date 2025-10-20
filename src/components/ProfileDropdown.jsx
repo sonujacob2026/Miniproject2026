@@ -70,7 +70,7 @@ const ProfileDropdown = () => {
         </div>
         
         {/* Username */}
-        <div className="hidden md:block text-left">
+        <div className="hidden md:flex flex-col items-start text-left">
           <p className="text-sm font-medium text-gray-900">{getDisplayName()}</p>
           <p className="text-xs text-gray-500">{user?.email}</p>
         </div>

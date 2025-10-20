@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { supabase } from '../lib/supabase';
+import supabaseService from '../services/supabaseService';
 import { getSwal } from '../lib/swal';
 import EnhancedReceiptUpload from './EnhancedReceiptUpload';
 
@@ -25,7 +26,13 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
   const [availableSubcategories, setAvailableSubcategories] = useState([]);
   const [categories, setCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [subcategoriesLoading, setSubcategoriesLoading] = useState(false);
   const [dynamicFields, setDynamicFields] = useState({});
+  const [agricultureErrors, setAgricultureErrors] = useState({});
+  const [showOtherCategoryInput, setShowOtherCategoryInput] = useState(false);
+  const [otherCategoryName, setOtherCategoryName] = useState('');
+  const [showOtherSubcategoryInput, setShowOtherSubcategoryInput] = useState(false);
+  const [otherSubcategoryName, setOtherSubcategoryName] = useState('');
 
   // Category-specific field configurations
   const categoryFieldConfigs = {
@@ -260,11 +267,10 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
     const fetchCategories = async () => {
       try {
         setCategoriesLoading(true);
-        const { data: categoriesData, error } = await supabase
-          .from('income_categories')
-          .select('*')
-          .eq('is_active', true)
-          .order('name');
+        const { data: categoriesData, error } = await supabaseService.select('income_categories', {
+          select: '*',
+          order: { column: 'name', ascending: true }
+        });
         
         if (error) throw error;
         
@@ -291,28 +297,32 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
   // Update subcategories when category changes
   useEffect(() => {
     const updateSubcategories = async () => {
-      if (!formData.category) {
+      if (!formData.category || formData.category === 'Other') {
         setAvailableSubcategories([]);
         setFormData(prev => ({
           ...prev,
           subcategory: ''
         }));
+        setSubcategoriesLoading(false);
         return;
       }
       
       try {
+        setSubcategoriesLoading(true);
+        
         // Clear subcategory first
         setFormData(prev => ({
           ...prev,
           subcategory: ''
         }));
         
-        const { data: subcategoriesData, error } = await supabase
-          .from('income_subcategories')
-          .select('*')
-          .eq('category_id', categories.find(cat => cat.name === formData.category)?.id)
-          .eq('is_active', true)
-          .order('name');
+        const { data: subcategoriesData, error } = await supabaseService.select('income_subcategories', {
+          select: '*',
+          eq: { 
+            category_id: categories.find(cat => cat.name === formData.category)?.id
+          },
+          order: { column: 'name', ascending: true }
+        });
         
         if (error) throw error;
         
@@ -332,6 +342,8 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
           ...prev,
           subcategory: ''
         }));
+      } finally {
+        setSubcategoriesLoading(false);
       }
     };
 
@@ -347,21 +359,93 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
 
   // Handle category change and update dynamic fields
   const handleCategoryChange = (category) => {
-    setFormData(prev => ({
-      ...prev,
-      category: category
-    }));
-
-    // Initialize dynamic fields for the selected category
-    const config = categoryFieldConfigs[category];
-    if (config) {
-      const newDynamicFields = {};
-      config.fields.forEach(field => {
-        newDynamicFields[field] = '';
-      });
-      setDynamicFields(newDynamicFields);
-    } else {
+    if (category === 'Other') {
+      setShowOtherCategoryInput(true);
+      setFormData(prev => ({
+        ...prev,
+        category: 'Other',
+        subcategory: ''
+      }));
+      setAvailableSubcategories([]);
+      setShowOtherSubcategoryInput(false);
       setDynamicFields({});
+    } else {
+      setShowOtherCategoryInput(false);
+      setOtherCategoryName('');
+      setFormData(prev => ({
+        ...prev,
+        category: category,
+        subcategory: ''
+      }));
+
+      // Initialize dynamic fields for the selected category
+      const config = categoryFieldConfigs[category];
+      if (config) {
+        const newDynamicFields = {};
+        config.fields.forEach(field => {
+          newDynamicFields[field] = '';
+        });
+        setDynamicFields(newDynamicFields);
+      } else {
+        setDynamicFields({});
+      }
+    }
+  };
+
+  // Handle subcategory change
+  const handleSubcategoryChange = (subcategory) => {
+    if (subcategory === 'Other') {
+      setShowOtherSubcategoryInput(true);
+      setFormData(prev => ({
+        ...prev,
+        subcategory: 'Other'
+      }));
+    } else {
+      setShowOtherSubcategoryInput(false);
+      setOtherSubcategoryName('');
+      setFormData(prev => ({
+        ...prev,
+        subcategory: subcategory
+      }));
+    }
+  };
+
+  // Save custom income category to database
+  const saveCustomIncomeCategory = async (categoryName) => {
+    try {
+      const categoryData = {
+        name: categoryName,
+        is_active: true
+      };
+      
+      const newCategory = await incomeCategoriesService.addCategory(categoryData);
+      setCategories(prev => [...prev, newCategory]);
+      return newCategory;
+    } catch (error) {
+      console.error('Error saving custom income category:', error);
+      throw error;
+    }
+  };
+
+  // Save custom income subcategory to database
+  const saveCustomIncomeSubcategory = async (categoryId, subcategoryName) => {
+    try {
+      const subcategoryData = {
+        category_id: categoryId,
+        name: subcategoryName,
+        is_recurring: false,
+        is_active: true
+      };
+      
+      const newSubcategory = await incomeCategoriesService.addSubcategory(subcategoryData);
+      
+      // Update available subcategories
+      setAvailableSubcategories(prev => [...prev, newSubcategory]);
+      
+      return newSubcategory;
+    } catch (error) {
+      console.error('Error saving custom income subcategory:', error);
+      throw error;
     }
   };
 
@@ -371,6 +455,54 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
       ...prev,
       [field]: value
     }));
+
+    // Inline validation for Agriculture fields
+    if (formData.category === 'Agriculture') {
+      validateAgricultureField(field, value);
+    }
+  };
+
+  // Validation helpers for Agriculture category
+  const validateAgricultureField = (field, value) => {
+    const errors = { ...agricultureErrors };
+    const startsWithDigit = /^\d/.test((value || '').toString().trim());
+
+    if (field === 'cropType' || field === 'season') {
+      if (!value || (value && value.toString().trim() === '')) {
+        errors[field] = 'This field is required';
+      } else if (startsWithDigit) {
+        errors[field] = 'Cannot start with a number';
+      } else {
+        delete errors[field];
+      }
+    }
+
+    if (field === 'farmSize' || field === 'yield') {
+      const num = Number(value);
+      if (value === '' || value === null || value === undefined) {
+        errors[field] = 'This field is required';
+      } else if (!Number.isFinite(num)) {
+        errors[field] = 'Enter a valid number';
+      } else if (num <= 0) {
+        errors[field] = 'Must be a positive number (> 0)';
+      } else {
+        delete errors[field];
+      }
+    }
+
+    setAgricultureErrors(errors);
+    return errors;
+  };
+
+  const validateAgricultureAll = () => {
+    if (formData.category !== 'Agriculture') return true;
+    const fields = ['cropType', 'farmSize', 'season', 'yield'];
+    let errors = { ...agricultureErrors };
+    fields.forEach(f => {
+      errors = validateAgricultureField(f, dynamicFields[f]);
+    });
+    setAgricultureErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   // Analyze extracted text with OpenAI AI for income documents
@@ -494,6 +626,45 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
         }, 100);
       }
     }
+
+    // If OCR contains Agriculture-like lines, auto-fill Agriculture details (client-side only)
+    try {
+      const text = (extractedData.rawText || extractedData.description || '').toString().toLowerCase();
+      const hasCropHints = /crop|agric|cardamom|pepper|paddy|rice|wheat|maize|sugarcane/.test(text);
+      if (hasCropHints) {
+        // Crop name
+        const cropMatch = text.match(/(cardamom|pepper|paddy|rice|wheat|maize|sugarcane|banana|coconut|cotton)/i);
+        const cropType = cropMatch ? cropMatch[1] : '';
+
+        // Quantity or farm size (kg or acres/hectares)
+        let farmSize = '';
+        const qtyKg = text.match(/\b(\d{1,5})\s*(kg|kgs)\b/i);
+        if (qtyKg) farmSize = qtyKg[1];
+        const acres = text.match(/\b(\d{1,5})\s*(acre|acres|hectare|hectares)\b/i);
+        if (acres) farmSize = acres[1];
+
+        // Yield = quantity number near item line (fallback)
+        let agYield = '';
+        const itemLine = text.match(/item.*?\n([\s\S]{0,80})/i);
+        if (itemLine) {
+          const y = itemLine[1].match(/\b(\d{1,6})\b/);
+          if (y) agYield = y[1];
+        }
+        if (!agYield && qtyKg) agYield = qtyKg[1];
+
+        setFormData(prev => ({ ...prev, category: 'Agriculture' }));
+        handleCategoryChange('Agriculture');
+        setDynamicFields(prev => ({
+          ...prev,
+          cropType: cropType || prev.cropType || '',
+          farmSize: farmSize || prev.farmSize || '',
+          season: prev.season || '',
+          yield: agYield || prev.yield || ''
+        }));
+      }
+    } catch (e) {
+      // ignore parsing errors
+    }
     
     // Payment method extraction
     if (extractedData.paymentMethod) {
@@ -570,6 +741,45 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
       return;
     }
 
+    // Validate custom category input
+    if (formData.category === 'Other' && (!otherCategoryName || otherCategoryName.trim() === '')) {
+      const Swal = await getSwal();
+      await Swal.fire({
+        title: 'Custom Category Required',
+        text: 'Please enter a custom category name',
+        icon: 'warning',
+        confirmButtonColor: '#3b82f6'
+      });
+      return;
+    }
+
+    // Validate Agriculture specific fields
+    if (formData.category === 'Agriculture') {
+      const ok = validateAgricultureAll();
+      if (!ok) {
+        const Swal = await getSwal();
+        await Swal.fire({
+          title: 'Validation Error',
+          text: 'Please fix errors in Agriculture details before submitting.',
+          icon: 'warning',
+          confirmButtonColor: '#3b82f6'
+        });
+        return;
+      }
+    }
+
+    // Validate custom subcategory input
+    if (formData.subcategory === 'Other' && (!otherSubcategoryName || otherSubcategoryName.trim() === '')) {
+      const Swal = await getSwal();
+      await Swal.fire({
+        title: 'Custom Subcategory Required',
+        text: 'Please enter a custom subcategory name',
+        icon: 'warning',
+        confirmButtonColor: '#3b82f6'
+      });
+      return;
+    }
+
     // Validate date
     if (!(await validateDate(formData.date))) {
       return;
@@ -600,15 +810,57 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
 
       console.log('Adding income for user:', user.id);
 
+      let finalCategory = formData.category;
+      let finalSubcategory = formData.subcategory;
+
+      // Handle custom category
+      if (formData.category === 'Other') {
+        try {
+          const newCategory = await saveCustomIncomeCategory(otherCategoryName.trim());
+          finalCategory = newCategory.name;
+        } catch (error) {
+          const Swal = await getSwal();
+          await Swal.fire({
+            title: 'Error Creating Category',
+            text: 'Error creating custom category. Please try again.',
+            icon: 'error',
+            confirmButtonColor: '#ef4444'
+          });
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Handle custom subcategory
+      if (formData.subcategory === 'Other') {
+        try {
+          const selectedCategory = categories.find(cat => cat.name === finalCategory);
+          if (selectedCategory) {
+            await saveCustomIncomeSubcategory(selectedCategory.id, otherSubcategoryName.trim());
+            finalSubcategory = otherSubcategoryName.trim();
+          }
+        } catch (error) {
+          const Swal = await getSwal();
+          await Swal.fire({
+            title: 'Error Creating Subcategory',
+            text: 'Error creating custom subcategory. Please try again.',
+            icon: 'error',
+            confirmButtonColor: '#ef4444'
+          });
+          setLoading(false);
+          return;
+        }
+      }
+
       // Get category and subcategory IDs
-      const selectedCategory = categories.find(cat => cat.name === formData.category);
-      const selectedSubcategory = availableSubcategories.find(sub => sub.name === formData.subcategory);
+      const selectedCategory = categories.find(cat => cat.name === finalCategory);
+      const selectedSubcategory = availableSubcategories.find(sub => sub.name === finalSubcategory);
 
       const incomeData = {
         user_id: user.id,
         amount: parseFloat(formData.amount),
-        category: formData.category,
-        subcategory: formData.subcategory || null,
+        category: finalCategory,
+        subcategory: finalSubcategory || null,
         payment_method: formData.paymentMethod,
         date: formData.date,
         description: formData.description || null,
@@ -619,17 +871,12 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
         is_recurring: formData.isRecurring,
         recurring_frequency: formData.isRecurring ? formData.recurringFrequency : null,
         category_id: selectedCategory?.id || null,
-        subcategory_id: selectedSubcategory?.id || null,
-        // Add dynamic fields based on category
-        ...(formData.category && categoryFieldConfigs[formData.category] ? dynamicFields : {})
+        subcategory_id: selectedSubcategory?.id || null
       };
 
       console.log('Income data to insert:', incomeData);
 
-      const { data, error } = await supabase
-        .from('incomes')
-        .insert([incomeData])
-        .select();
+      const { data, error } = await supabaseService.insert('incomes', [incomeData]);
 
       if (error) {
         console.error('Error adding income:', error);
@@ -668,6 +915,13 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
           isRecurring: false,
           recurringFrequency: 'monthly'
         });
+
+        // Reset other inputs
+        setShowOtherCategoryInput(false);
+        setOtherCategoryName('');
+        setShowOtherSubcategoryInput(false);
+        setOtherSubcategoryName('');
+        setDynamicFields({});
 
         // Notify parent component
         if (onIncomeAdded) {
@@ -806,7 +1060,25 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
                       {category.icon} {category.name}
                     </option>
                   ))}
+                  <option value="Other">➕ Other</option>
                 </select>
+              )}
+              
+              {/* Custom Category Input */}
+              {showOtherCategoryInput && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter Custom Category Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={otherCategoryName}
+                    onChange={(e) => setOtherCategoryName(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter your custom category name"
+                    required
+                  />
+                </div>
               )}
             </div>
 
@@ -815,27 +1087,56 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Subcategory *
               </label>
-              <select
-                value={formData.subcategory}
-                onChange={(e) => handleInputChange('subcategory', e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-                disabled={!formData.category || categoriesLoading}
-              >
-                <option value="">
-                  {!formData.category 
-                    ? 'Select a category first' 
-                    : availableSubcategories.length === 0 
-                      ? 'No subcategories available' 
-                      : 'Select subcategory'
-                  }
-                </option>
-                {availableSubcategories.map((subcategory) => (
-                  <option key={subcategory.name} value={subcategory.name}>
-                    {subcategory.icon} {subcategory.name}
+              {subcategoriesLoading ? (
+                <div className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 flex items-center justify-center">
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin mr-2"></div>
+                  <span className="text-gray-500">Loading subcategories...</span>
+                </div>
+              ) : (
+                <select
+                  value={formData.subcategory}
+                  onChange={(e) => handleSubcategoryChange(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                  disabled={!formData.category || formData.category === 'Other' || categoriesLoading}
+                >
+                  <option value="">
+                    {!formData.category 
+                      ? 'Select a category first' 
+                      : formData.category === 'Other'
+                        ? 'Custom category - no subcategories'
+                        : availableSubcategories.length === 0 
+                          ? 'No subcategories available' 
+                          : 'Select subcategory'
+                    }
                   </option>
-                ))}
-              </select>
+                  {availableSubcategories.map((subcategory) => (
+                    <option key={subcategory.name} value={subcategory.name}>
+                      {subcategory.icon} {subcategory.name}
+                    </option>
+                  ))}
+                  {formData.category && formData.category !== 'Other' && availableSubcategories.length > 0 && (
+                    <option value="Other">➕ Other</option>
+                  )}
+                </select>
+              )}
+              
+              {/* Custom Subcategory Input */}
+              {showOtherSubcategoryInput && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter Custom Subcategory Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={otherSubcategoryName}
+                    onChange={(e) => setOtherSubcategoryName(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter your custom subcategory name"
+                    required
+                  />
+                </div>
+              )}
             </div>
 
             {/* Payment Method */}
@@ -890,12 +1191,19 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
                         {categoryFieldConfigs[formData.category].labels[field]}
                       </label>
                       <input
-                        type="text"
+                        type={(formData.category === 'Agriculture' && (field === 'farmSize' || field === 'yield')) ? 'number' : 'text'}
+                        min={(formData.category === 'Agriculture' && (field === 'farmSize' || field === 'yield')) ? '0.01' : undefined}
+                        step={(formData.category === 'Agriculture' && (field === 'farmSize' || field === 'yield')) ? '0.01' : undefined}
                         value={dynamicFields[field] || ''}
                         onChange={(e) => handleDynamicFieldChange(field, e.target.value)}
                         placeholder={categoryFieldConfigs[formData.category].placeholders[field]}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                          agricultureErrors[field] ? 'border-red-400' : 'border-gray-300'
+                        }`}
                       />
+                      {formData.category === 'Agriculture' && agricultureErrors[field] && (
+                        <p className="text-xs text-red-600 mt-1">{agricultureErrors[field]}</p>
+                      )}
                     </div>
                   ))}
                 </div>
