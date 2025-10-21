@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { useProfile } from '../context/ProfileContext';
+import { useLiveBalance } from '../lib/useLiveBalance';
 import ProfileDropdown from './ProfileDropdown';
-import BalancePill from './BalancePill';
 import TransactionsSheet from './TransactionsSheet';
+import BackToDashboard from './BackToDashboard';
 
 const UnifiedNavbar = ({ 
   showBackButton = false, 
@@ -20,7 +21,12 @@ const UnifiedNavbar = ({
   const { profile } = useProfile();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [showSheet, setShowSheet] = useState(false);
+  const [showTransactionsSheet, setShowTransactionsSheet] = useState(false);
+
+  // Get balance data for authenticated users
+  const { loading: balanceLoading, error: balanceError, balanceInr, isNegative } = useLiveBalance(
+    profile?.monthly_income || 40000
+  );
 
   const handleBackClick = () => {
     navigate(backButtonPath);
@@ -65,25 +71,13 @@ const UnifiedNavbar = ({
               <span className="ml-3 text-2xl font-bold text-gray-900">ExpenseAI</span>
             </div>
             
-            {/* Show back button if needed */}
-            {showBackButton && (
-              <button
-                onClick={handleBackClick}
-                className={`flex items-center px-4 py-2 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105 ${
-                  backButtonStyle === "gradient" 
-                    ? "bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white" 
-                    : "bg-white border-2 border-green-500 text-green-600 hover:bg-green-50 hover:border-green-600"
-                }`}
-              >
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-                {backButtonText}
-              </button>
+            {/* Back to Dashboard Button - Show when not on dashboard */}
+            {user && window.location.pathname !== '/dashboard' && (
+              <BackToDashboard size="small" />
             )}
           </div>
 
-          {/* Right Side - Navigation, Balance, Auth Buttons, or Profile */}
+          {/* Right Side - Navigation, Auth Buttons, or Profile */}
           <div className="flex items-center space-x-4">
             {/* Desktop Navigation */}
             {showNavigation && !user && (
@@ -113,9 +107,25 @@ const UnifiedNavbar = ({
               </div>
             )}
 
-            {/* Prominent Balance pill (click to see recent transactions) */}
+            {/* Balance Display (for authenticated users) */}
             {user && (
-              <BalancePill onClick={() => setShowSheet(true)} />
+              <div className="flex items-center space-x-2">
+                {balanceLoading && (
+                  <span className="text-sm text-gray-500 animate-pulse">Calculating balance…</span>
+                )}
+                {!balanceLoading && balanceError && (
+                  <span className="text-sm text-red-600" title={balanceError}>Failed to load</span>
+                )}
+                {!balanceLoading && !balanceError && (
+                  <button
+                    onClick={() => setShowTransactionsSheet(true)}
+                    className={`text-sm md:text-base font-semibold hover:opacity-80 transition-opacity cursor-pointer ${isNegative ? 'text-red-600' : 'text-green-600'}`}
+                    title="Click to view transaction history and download PDF"
+                  >
+                    💰 Balance: {balanceInr}
+                  </button>
+                )}
+              </div>
             )}
 
             {/* Profile Dropdown (for authenticated users) */}
@@ -167,7 +177,12 @@ const UnifiedNavbar = ({
           </div>
         )}
       </div>
-      <TransactionsSheet open={showSheet} onClose={() => setShowSheet(false)} />
+
+      {/* Transactions Sheet */}
+      <TransactionsSheet 
+        open={showTransactionsSheet} 
+        onClose={() => setShowTransactionsSheet(false)} 
+      />
     </header>
   );
 };

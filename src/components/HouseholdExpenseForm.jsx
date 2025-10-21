@@ -27,6 +27,72 @@ const HouseholdExpenseForm = ({ onExpenseAdded, onClose }) => {
   const [availableSubcategories, setAvailableSubcategories] = useState([]);
   const [categories, setCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [showOtherCategoryInput, setShowOtherCategoryInput] = useState(false);
+  const [otherCategoryName, setOtherCategoryName] = useState('');
+  const [showOtherSubcategoryInput, setShowOtherSubcategoryInput] = useState(false);
+  const [otherSubcategoryName, setOtherSubcategoryName] = useState('');
+
+  // Validation function for custom inputs
+  const validateNameInput = (value) => {
+    if (value.length === 0) return true; // Allow empty for now
+    const firstChar = value.charAt(0);
+    // Allow letters, spaces, and common punctuation like apostrophes, hyphens
+    const isValidFirstChar = /^[a-zA-Z\s'-]/.test(firstChar);
+    return isValidFirstChar;
+  };
+
+  // Handle custom category change
+  const handleCustomCategoryChange = (value) => {
+    if (validateNameInput(value)) {
+      setOtherCategoryName(value);
+    }
+  };
+
+  // Handle custom subcategory change
+  const handleCustomSubcategoryChange = (value) => {
+    if (validateNameInput(value)) {
+      setOtherSubcategoryName(value);
+    }
+  };
+
+  // Save custom category to database
+  const saveCustomCategory = async (categoryName) => {
+    try {
+      const categoryData = {
+        category: categoryName,
+        icon: '📝',
+        description: `Custom category: ${categoryName}`
+      };
+      
+      const newCategory = await expenseCategoriesService.addCategory(categoryData);
+      setCategories(prev => [...prev, newCategory]);
+      return newCategory;
+    } catch (error) {
+      console.error('Error saving custom category:', error);
+      throw error;
+    }
+  };
+
+  // Save custom subcategory to database
+  const saveCustomSubcategory = async (categoryId, subcategoryName) => {
+    try {
+      const subcategoryData = {
+        name: subcategoryName,
+        icon: '📝',
+        description: `Custom subcategory: ${subcategoryName}`
+      };
+      
+      const updatedCategory = await expenseCategoriesService.addSubcategory(categoryId, subcategoryData);
+      
+      // Reload subcategories for current category
+      await loadSubcategories(formData.category);
+      
+      return updatedCategory;
+    } catch (error) {
+      console.error('Error saving custom subcategory:', error);
+      throw error;
+    }
+  };
 
   // Date validation helper function
   const validateDate = async (dateString) => {
@@ -182,10 +248,57 @@ const HouseholdExpenseForm = ({ onExpenseAdded, onClose }) => {
   }, [formData.subcategory, availableSubcategories]);
 
   const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    if (field === 'category') {
+      handleCategoryChange(value);
+    } else if (field === 'subcategory') {
+      handleSubcategoryChange(value);
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [field]: value
+      }));
+    }
+  };
+
+  // Handle category change
+  const handleCategoryChange = async (category) => {
+    if (category === 'Other') {
+      setShowOtherCategoryInput(true);
+      setFormData(prev => ({
+        ...prev,
+        category: 'Other',
+        subcategory: ''
+      }));
+      setAvailableSubcategories([]);
+      setShowOtherSubcategoryInput(false);
+    } else {
+      setShowOtherCategoryInput(false);
+      setOtherCategoryName('');
+      setFormData(prev => ({
+        ...prev,
+        category: category,
+        subcategory: ''
+      }));
+      await loadSubcategories(category);
+    }
+  };
+
+  // Handle subcategory change
+  const handleSubcategoryChange = (subcategory) => {
+    if (subcategory === 'Other') {
+      setShowOtherSubcategoryInput(true);
+      setFormData(prev => ({
+        ...prev,
+        subcategory: 'Other'
+      }));
+    } else {
+      setShowOtherSubcategoryInput(false);
+      setOtherSubcategoryName('');
+      setFormData(prev => ({
+        ...prev,
+        subcategory: subcategory
+      }));
+    }
   };
 
   // Handle data extracted from receipt OCR
@@ -348,6 +461,30 @@ const HouseholdExpenseForm = ({ onExpenseAdded, onClose }) => {
       return;
     }
 
+    // Validate custom category input
+    if (formData.category === 'Other' && (!otherCategoryName || otherCategoryName.trim() === '')) {
+      const Swal = await getSwal();
+      await Swal.fire({
+        title: 'Custom Category Required',
+        text: 'Please enter a custom category name',
+        icon: 'warning',
+        confirmButtonColor: '#3b82f6'
+      });
+      return;
+    }
+
+    // Validate custom subcategory input
+    if (formData.subcategory === 'Other' && (!otherSubcategoryName || otherSubcategoryName.trim() === '')) {
+      const Swal = await getSwal();
+      await Swal.fire({
+        title: 'Custom Subcategory Required',
+        text: 'Please enter a custom subcategory name',
+        icon: 'warning',
+        confirmButtonColor: '#3b82f6'
+      });
+      return;
+    }
+
     // Validate date
     if (!(await validateDate(formData.date))) {
       return;
@@ -378,15 +515,57 @@ const HouseholdExpenseForm = ({ onExpenseAdded, onClose }) => {
 
       console.log('Adding expense for user:', user.id);
 
+      let finalCategory = formData.category;
+      let finalSubcategory = formData.subcategory;
+
+      // Handle custom category
+      if (formData.category === 'Other') {
+        try {
+          const newCategory = await saveCustomCategory(otherCategoryName.trim());
+          finalCategory = newCategory.category;
+        } catch (error) {
+          const Swal = await getSwal();
+          await Swal.fire({
+            title: 'Error Creating Custom Category',
+            text: 'Failed to create custom category. Please try again.',
+            icon: 'error',
+            confirmButtonColor: '#ef4444'
+          });
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Handle custom subcategory
+      if (formData.subcategory === 'Other') {
+        try {
+          const selectedCategory = categories.find(cat => cat.category === finalCategory);
+          if (selectedCategory) {
+            await saveCustomSubcategory(selectedCategory.id, otherSubcategoryName.trim());
+            finalSubcategory = otherSubcategoryName.trim();
+          }
+        } catch (error) {
+          const Swal = await getSwal();
+          await Swal.fire({
+            title: 'Error Creating Custom Subcategory',
+            text: 'Failed to create custom subcategory. Please try again.',
+            icon: 'error',
+            confirmButtonColor: '#ef4444'
+          });
+          setLoading(false);
+          return;
+        }
+      }
+
       // Map values to match DB constraints in DATABASE_SETUP.sql (transactions table)
-      const mappedCategory = mapToDbCategory(formData.category, formData.subcategory);
+      const mappedCategory = mapToDbCategory(finalCategory, finalSubcategory);
       const mappedPayment = mapToDbPayment(formData.paymentMethod);
 
       const expenseData = {
         user_id: user.id,
         amount: parseFloat(formData.amount),
         category: mappedCategory, // must be one of: Food, Rent, Transport, Shopping, Bills, EMI, Education, Entertainment, Investments
-        subcategory: formData.subcategory || null, // store the specific bill/item like "Electricity Bill"
+        subcategory: finalSubcategory || null, // store the specific bill/item like "Electricity Bill"
         payment_method: mappedPayment, // must be one of: UPI, Card, Cash, Bank Transfer
         date: formData.date,
         description: formData.description || null,
@@ -439,6 +618,13 @@ const HouseholdExpenseForm = ({ onExpenseAdded, onClose }) => {
           notes: '',
           receiptUrl: ''
         });
+
+        // Reset custom inputs
+        setShowOtherCategoryInput(false);
+        setOtherCategoryName('');
+        setShowOtherSubcategoryInput(false);
+        setOtherSubcategoryName('');
+        setAvailableSubcategories([]);
 
         // Notify parent component
         if (onExpenseAdded) {
@@ -575,7 +761,30 @@ const HouseholdExpenseForm = ({ onExpenseAdded, onClose }) => {
                       {category.icon} {category.category}
                     </option>
                   ))}
+                  <option value="Other">➕ Other</option>
                 </select>
+              )}
+              
+              {/* Custom Category Input */}
+              {showOtherCategoryInput && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter Custom Category Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={otherCategoryName}
+                    onChange={(e) => handleCustomCategoryChange(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    placeholder="Enter your custom category name (letters only for first character)"
+                    required
+                  />
+                  {otherCategoryName && !validateNameInput(otherCategoryName) && (
+                    <p className="text-red-500 text-xs mt-1">
+                      Category name must start with a letter, space, apostrophe, or hyphen
+                    </p>
+                  )}
+                </div>
               )}
             </div>
 
@@ -589,14 +798,16 @@ const HouseholdExpenseForm = ({ onExpenseAdded, onClose }) => {
                 onChange={(e) => handleInputChange('subcategory', e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 required
-                disabled={!formData.category || categoriesLoading}
+                disabled={!formData.category || categoriesLoading || formData.category === 'Other'}
               >
                 <option value="">
                   {!formData.category 
                     ? 'Select a category first' 
-                    : availableSubcategories.length === 0 
-                      ? 'No subcategories available' 
-                      : 'Select subcategory'
+                    : formData.category === 'Other'
+                      ? 'Select custom category first'
+                      : availableSubcategories.length === 0 
+                        ? 'No subcategories available' 
+                        : 'Select subcategory'
                   }
                 </option>
                 {availableSubcategories.map((subcategory) => (
@@ -604,7 +815,32 @@ const HouseholdExpenseForm = ({ onExpenseAdded, onClose }) => {
                     {subcategory.icon} {subcategory.name}
                   </option>
                 ))}
+                {formData.category && formData.category !== 'Other' && availableSubcategories.length > 0 && (
+                  <option value="Other">➕ Other</option>
+                )}
               </select>
+              
+              {/* Custom Subcategory Input */}
+              {showOtherSubcategoryInput && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Enter Custom Subcategory Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={otherSubcategoryName}
+                    onChange={(e) => handleCustomSubcategoryChange(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    placeholder="Enter your custom subcategory name (letters only for first character)"
+                    required
+                  />
+                  {otherSubcategoryName && !validateNameInput(otherSubcategoryName) && (
+                    <p className="text-red-500 text-xs mt-1">
+                      Subcategory name must start with a letter, space, apostrophe, or hyphen
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Payment Method */}

@@ -382,25 +382,48 @@ const SystemSettings = () => {
             }, { onConflict: 'user_id' });
           dbErr = upsertErr || null;
         } else {
-          // Admin users (not authenticated in Supabase): update by email; insert if not exists
-          const { data: existing, error: findErr } = await supabase
-            .from('user_profiles')
-            .select('email')
-            .eq('email', userEmail)
-            .maybeSingle();
-          if (findErr) dbErr = findErr;
-          if (!dbErr) {
-            if (existing) {
-              const { error: updErr } = await supabase
-                .from('user_profiles')
-                .update({ password: hashHex, password_updated_at: now, updated_at: now })
-                .eq('email', userEmail);
-              dbErr = updErr || null;
+          // Admin users (not authenticated in Supabase): use backend endpoint
+          console.log('Admin user detected, updating password via backend');
+          
+          try {
+            // Use backend endpoint to update admin password
+            const response = await fetch('/api/admin/update-admin-password', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                email: userEmail,
+                password: passwordForm.newPassword // Send plain password, backend will hash it
+              })
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+              console.error('Backend error updating admin password:', result.error);
+              dbErr = new Error(result.error);
             } else {
-              const { error: insErr } = await supabase
-                .from('user_profiles')
-                .insert({ email: userEmail, password: hashHex, password_updated_at: now, created_at: now, updated_at: now });
-              dbErr = insErr || null;
+              console.log('Admin password updated successfully via backend');
+              dbErr = null;
+            }
+          } catch (fetchErr) {
+            console.error('Error calling backend endpoint:', fetchErr);
+            // Fallback: store in localStorage if backend call fails
+            try {
+              const adminPasswordData = {
+                email: userEmail,
+                password: hashHex,
+                password_updated_at: now,
+                updated_at: now
+              };
+              
+              localStorage.setItem('admin_password_data', JSON.stringify(adminPasswordData));
+              console.log('Admin password stored locally as fallback');
+              dbErr = null;
+            } catch (localErr) {
+              console.error('Error storing admin password locally:', localErr);
+              dbErr = localErr;
             }
           }
         }

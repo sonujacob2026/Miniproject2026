@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import ExpenseList from './ExpenseList';
 import ExpenseStats from './ExpenseStats';
+import RecentTransactions from './RecentTransactions';
 import FinancialInsights from './FinancialInsights';
 import BudgetRecommendations from './BudgetRecommendations';
 import FinancialGoalsDisplay from './FinancialGoalsDisplay';
@@ -30,7 +31,6 @@ const Dashboard = () => {
   const [showAddIncome, setShowAddIncome] = useState(false);
   const [expenses, setExpenses] = useState([]);
   const [incomes, setIncomes] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('expenses');
   const [showBudget, setShowBudget] = useState(false);
   const [showGoals, setShowGoals] = useState(false);
@@ -97,10 +97,9 @@ const Dashboard = () => {
   }, [user?.id, profileLoading, onboardingIncomplete, navigate]);
 
   const loadExpenses = async () => {
-    if (!user?.id) return;
-    
     try {
-      setLoading(true);
+      if (!user?.id) return;
+      
       const { data, error } = await supabase
         .from('expenses')
         .select('*')
@@ -108,29 +107,26 @@ const Dashboard = () => {
         .order('date', { ascending: false });
 
       if (error) {
-        console.error('Error loading expenses from database:', error);
-        // Fallback to localStorage
-        const savedExpenses = localStorage.getItem('expenseai_expenses');
-        if (savedExpenses) {
-          setExpenses(JSON.parse(savedExpenses));
-        }
-      } else {
-        setExpenses(data || []);
+        console.error('Error loading expenses:', error);
+        return;
       }
+
+      setExpenses(data || []);
     } catch (error) {
       console.error('Error loading expenses:', error);
-      // Fallback to localStorage
-      const savedExpenses = localStorage.getItem('expenseai_expenses');
-      if (savedExpenses) {
-        setExpenses(JSON.parse(savedExpenses));
-      }
     }
   };
 
   const loadIncomes = async () => {
-    if (!user?.id) return;
-    
     try {
+      if (!user?.id) {
+        console.log('Dashboard: No user ID, skipping income load');
+        return;
+      }
+      
+      console.log('Dashboard: Loading incomes for user:', user.id);
+      console.log('Dashboard: User object:', user);
+      
       const { data, error } = await supabase
         .from('incomes')
         .select('*')
@@ -138,24 +134,27 @@ const Dashboard = () => {
         .order('date', { ascending: false });
 
       if (error) {
-        console.error('Error loading incomes from database:', error);
-        // Fallback to localStorage
-        const savedIncomes = localStorage.getItem('expenseai_incomes');
-        if (savedIncomes) {
-          setIncomes(JSON.parse(savedIncomes));
-        }
-      } else {
-        setIncomes(data || []);
+        console.error('Error loading incomes:', error);
+        return;
       }
+
+      console.log('Dashboard: Loaded incomes:', data);
+      console.log('Dashboard: Number of incomes loaded:', data?.length || 0);
+      
+      // Debug: Check if we can see any incomes in the database
+      if (!data || data.length === 0) {
+        console.log('Dashboard: No incomes found, checking database...');
+        const { data: allIncomes, error: allError } = await supabase
+          .from('incomes')
+          .select('*')
+          .limit(5);
+        console.log('Dashboard: All incomes in database (first 5):', allIncomes);
+        if (allError) console.error('Dashboard: Error fetching all incomes:', allError);
+      }
+      
+      setIncomes(data || []);
     } catch (error) {
       console.error('Error loading incomes:', error);
-      // Fallback to localStorage
-      const savedIncomes = localStorage.getItem('expenseai_incomes');
-      if (savedIncomes) {
-        setIncomes(JSON.parse(savedIncomes));
-      }
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -163,11 +162,6 @@ const Dashboard = () => {
   useEffect(() => {
     localStorage.setItem('expenseai_expenses', JSON.stringify(expenses));
   }, [expenses]);
-
-  // Save incomes to localStorage whenever incomes change
-  useEffect(() => {
-    localStorage.setItem('expenseai_incomes', JSON.stringify(incomes));
-  }, [incomes]);
 
   // Disable background scroll (html + body) when modals are open
   useEffect(() => {
@@ -199,28 +193,15 @@ const Dashboard = () => {
     };
   }, [showAddExpense, showAddIncome]);
 
-  const addExpense = (newExpense) => {
-    const expense = {
-      id: Date.now().toString(),
-      ...newExpense,
-      createdAt: new Date().toISOString()
-    };
-    setExpenses(prev => [expense, ...prev]);
-    setShowAddExpense(false);
-    // Refresh data from database
-    refreshData();
-  };
-
-  const refreshData = async () => {
+  const addExpense = async (newExpense) => {
+    // Refresh expenses from database
     await loadExpenses();
-    await loadIncomes();
+    setShowAddExpense(false);
   };
 
   const deleteExpense = (expenseId) => {
     if (window.confirm('Are you sure you want to delete this expense?')) {
       setExpenses(prev => prev.filter(expense => expense.id !== expenseId));
-      // Refresh data from database
-      refreshData();
     }
   };
 
@@ -232,8 +213,6 @@ const Dashboard = () => {
           : expense
       )
     );
-    // Refresh data from database
-    refreshData();
   };
 
   const handleSignOut = async () => {
@@ -458,53 +437,20 @@ const Dashboard = () => {
 
 
         {/* Expense Statistics */}
-        {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="bg-white rounded-lg p-6 shadow-sm border border-gray-200 animate-pulse">
-                <div className="flex items-center">
-                  <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
-                  <div className="ml-4 flex-1">
-                    <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
-                    <div className="h-6 bg-gray-200 rounded w-16 mb-1"></div>
-                    <div className="h-3 bg-gray-200 rounded w-24"></div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <ExpenseStats expenses={expenses} incomes={incomes} />
-        )}
+        <ExpenseStats expenses={expenses} incomes={incomes} />
+
+        {/* Recent Transactions */}
+        <RecentTransactions
+          expenses={expenses}
+          incomes={incomes}
+        />
 
         {/* Expense List */}
-        {loading ? (
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-            <div className="animate-pulse">
-              <div className="h-6 bg-gray-200 rounded w-32 mb-4"></div>
-              <div className="space-y-3">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-8 h-8 bg-gray-200 rounded"></div>
-                      <div>
-                        <div className="h-4 bg-gray-200 rounded w-24 mb-1"></div>
-                        <div className="h-3 bg-gray-200 rounded w-16"></div>
-                      </div>
-                    </div>
-                    <div className="h-4 bg-gray-200 rounded w-16"></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <ExpenseList
-            expenses={expenses}
-            onDelete={deleteExpense}
-            onEdit={editExpense}
-          />
-        )}
+        <ExpenseList
+          expenses={expenses}
+          onDelete={deleteExpense}
+          onEdit={editExpense}
+        />
 
       </main>
 
@@ -535,8 +481,9 @@ const Dashboard = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="max-w-4xl w-full max-h-[90vh] overflow-auto">
             <AddIncomeForm
-              onIncomeAdded={(income) => {
-                // You can add income handling logic here if needed
+              onIncomeAdded={async (income) => {
+                // Refresh incomes from database
+                await loadIncomes();
                 console.log('Income added:', income);
               }}
               onClose={() => setShowAddIncome(false)}

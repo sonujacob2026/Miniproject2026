@@ -34,6 +34,29 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
   const [showOtherSubcategoryInput, setShowOtherSubcategoryInput] = useState(false);
   const [otherSubcategoryName, setOtherSubcategoryName] = useState('');
 
+  // Validation function for custom inputs
+  const validateNameInput = (value) => {
+    if (value.length === 0) return true; // Allow empty for now
+    const firstChar = value.charAt(0);
+    // Allow letters, spaces, and common punctuation like apostrophes, hyphens
+    const isValidFirstChar = /^[a-zA-Z\s'-]/.test(firstChar);
+    return isValidFirstChar;
+  };
+
+  // Handle custom category change
+  const handleCustomCategoryChange = (value) => {
+    if (validateNameInput(value)) {
+      setOtherCategoryName(value);
+    }
+  };
+
+  // Handle custom subcategory change
+  const handleCustomSubcategoryChange = (value) => {
+    if (validateNameInput(value)) {
+      setOtherSubcategoryName(value);
+    }
+  };
+
   // Category-specific field configurations
   const categoryFieldConfigs = {
     'Salary': {
@@ -1073,11 +1096,16 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
                   <input
                     type="text"
                     value={otherCategoryName}
-                    onChange={(e) => setOtherCategoryName(e.target.value)}
+                    onChange={(e) => handleCustomCategoryChange(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter your custom category name"
+                    placeholder="Enter your custom category name (letters only for first character)"
                     required
                   />
+                  {otherCategoryName && !validateNameInput(otherCategoryName) && (
+                    <p className="text-red-500 text-xs mt-1">
+                      Category name must start with a letter, space, apostrophe, or hyphen
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1130,11 +1158,16 @@ const AddIncomeForm = ({ onIncomeAdded, onClose }) => {
                   <input
                     type="text"
                     value={otherSubcategoryName}
-                    onChange={(e) => setOtherSubcategoryName(e.target.value)}
+                    onChange={(e) => handleCustomSubcategoryChange(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter your custom subcategory name"
+                    placeholder="Enter your custom subcategory name (letters only for first character)"
                     required
                   />
+                  {otherSubcategoryName && !validateNameInput(otherSubcategoryName) && (
+                    <p className="text-red-500 text-xs mt-1">
+                      Subcategory name must start with a letter, space, apostrophe, or hyphen
+                    </p>
+                  )}
                 </div>
               )}
             </div>
